@@ -5,6 +5,7 @@ The model proposes. The client constrains and transports. NOEMA decides.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -24,6 +25,12 @@ from noema_client.config import (
 )
 from noema_client.discovery import Discovery, discover
 from noema_client.errors import FailureClass, NoemaAuthError, NoemaError, raise_for_failure
+from noema_client.isolated import (
+    ISOLATED_COMMAND_PATH,
+    admit_isolated_world_id,
+    is_isolated_world,
+    require_isolated_admin_header,
+)
 from noema_client.observations import prepare_context, render_observation, to_observation
 from noema_client.policy import ClientPolicy
 from noema_client.protocol import WebSocketGateway, derive_ws_url
@@ -45,6 +52,8 @@ class NoemaClient:
         http: Callable[..., dict[str, Any]] | None = None,
         transport: str = "auto",
         isolated: bool = False,
+        world_id: str | None = None,
+        admin_token: str | None = None,
         runtime: str = "noema-client",
         policy: ClientPolicy | None = None,
     ) -> None:
@@ -52,15 +61,22 @@ class NoemaClient:
         self.server = (server or load_server(self.config_home)).rstrip("/")
         self._http = http or default_http
         self.transport_pref = transport
-        self.isolated = isolated
+        self.world_id = world_id or os.environ.get("NOEMA_WORLD_ID") or None
+        cred = load_credential(self.config_home)
+        if not self.world_id and cred and cred.world_id:
+            self.world_id = cred.world_id
+        self.isolated = bool(isolated or is_isolated_world(self.world_id))
+        self._admin_token = admin_token or os.environ.get("NOEMA_ADMIN_TOKEN") or None
         self.runtime = runtime
         self.policy = policy or ClientPolicy()
         self.telemetry = Telemetry()
         self.discovery: Discovery | None = None
         self.session = Session(server=self.server, transport="http")
-        self._credential: StoredCredential | None = load_credential(self.config_home)
+        self._credential: StoredCredential | None = cred
         if self._credential:
             self.telemetry.remember_secret(self._credential.access_token)
+        if self._admin_token:
+            self.telemetry.remember_secret(self._admin_token)
         self._gateway: HttpGateway | None = None
         self.observation: Observation | None = None
         self.seal: str | None = None
@@ -75,7 +91,12 @@ class NoemaClient:
     def discover(self) -> Discovery:
         self.discovery = discover(self.server, self._http)
         live = self.server.rstrip("/") == DEFAULT_SERVER and not self.isolated
-        self.seal = resolve_seal(self.discovery, live_default=live, isolated=self.isolated)
+        self.seal = resolve_seal(
+            self.discovery,
+            live_default=live,
+            isolated=self.isolated,
+            world_id=self.world_id,
+        )
         self.session.protocol = self.discovery.protocol
         self.telemetry.record(event="discover", protocol=self.discovery.protocol, transport="http")
         return self.discovery
@@ -101,6 +122,7 @@ class NoemaClient:
             controller_id=meta.get("controller_id"),
             controller_type="agent",
             server=self.server,
+            world_id=self.world_id,
             protocol=self.session.protocol,
         )
         save_credential(cred, self.config_home)
@@ -115,7 +137,16 @@ class NoemaClient:
 
     def _bind_gateway(self, cred: StoredCredential) -> None:
         command_path = "/v1/command"
-        if self.discovery and self.discovery.command_uri:
+        world_id = self.world_id
+        admin_token = None
+        if self.isolated or is_isolated_world(world_id):
+            self.isolated = True
+            world_id = admit_isolated_world_id(world_id)
+            self.world_id = world_id
+            command_path = ISOLATED_COMMAND_PATH
+            self.seal = None
+            admin_token = require_isolated_admin_header(self._admin_token)
+        elif self.discovery and self.discovery.command_uri:
             parsed = urlparse(self.discovery.command_uri)
             command_path = parsed.path or "/v1/command"
         chosen = self.transport_pref
@@ -146,7 +177,9 @@ class NoemaClient:
             http=self._http,
             runtime=self.runtime,
             command_path=command_path,
+            world_id=world_id if self.isolated else None,
             seal=self.seal,
+            admin_token=admin_token,
         )
         self.session.seal_sent = bool(self.seal)
 
@@ -192,7 +225,7 @@ class NoemaClient:
             latency_ms=None,
             protocol=self.session.protocol,
             transport=self.session.transport,
-            client_version="0.1.0",
+            client_version="0.1.1",
         )
         return result
 
@@ -220,12 +253,15 @@ class NoemaClient:
             "connected": self.session.connected or bool(cred),
             "protocol": self.session.protocol,
             "world": self.session.world,
+            "world_id": self.world_id,
+            "isolated": self.isolated,
             "player_id": (cred.player_id if cred else None) or self.session.player_id,
             "controller_id": (cred.controller_id if cred else None) or self.session.controller_id,
             "controller_type": "agent",
             "transport": self.session.transport,
             "seal": "sent" if self.session.seal_sent or self.seal else "none",
             "credential": "stored" if cred else "missing",
+            "admin_header": "present" if self._admin_token else "missing",
             "cycle": self.session.cycle,
         }
 
@@ -245,6 +281,8 @@ class NoemaClient:
             disc = self.discover()
             report["discovery"] = disc.protocol
             report["seal"] = "required" if self.seal else "not-required"
+            report["isolated"] = self.isolated
+            report["world_id"] = self.world_id
         except Exception as exc:
             report["discovery"] = f"fail:{type(exc).__name__}"
         return report

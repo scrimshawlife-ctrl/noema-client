@@ -5,11 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from noema_client import ActionProposal, NoemaActionRejected, NoemaClient, NoemaSealError
+from noema_client import ActionProposal, NoemaActionRejected, NoemaClient, NoemaError, NoemaSealError
 from noema_client.auth import DeviceEnrollment
 from noema_client.cli import main as cli_main
 from noema_client.config import load_credential, save_credential, StoredCredential
 from noema_client.discovery import parse_discovery
+from noema_client.errors import NoemaAuthError
+from noema_client.isolated import admit_isolated_world_id, is_isolated_world
 from noema_client.policy import ClientPolicy
 from noema_client.seal import refused_play_flag, resolve_seal, sealed_prompt_hash
 from noema_client.transport import default_http
@@ -214,3 +216,123 @@ def test_cli_status_no_token(tmp_path: Path, monkeypatch):
     save_credential(StoredCredential(access_token="tok.should-not-print", server="https://example.invalid"), tmp_path)
     rc = cli_main(["--config-dir", str(tmp_path), "status"])
     assert rc == 0
+
+
+def test_admit_isolated_world_id():
+    assert is_isolated_world("test.hosted-canonical.client-proof")
+    assert not is_isolated_world("world.perihelion-reach")
+    assert admit_isolated_world_id("test.hosted-canonical.client-proof") == "test.hosted-canonical.client-proof"
+    with pytest.raises(NoemaError) as peri:
+        admit_isolated_world_id("world.perihelion-reach")
+    assert peri.value.code == "WORLD_FORBIDDEN"
+    with pytest.raises(NoemaError):
+        admit_isolated_world_id("world-01")
+    with pytest.raises(NoemaError):
+        admit_isolated_world_id("test.hosted-canonical.")
+    with pytest.raises(NoemaError):
+        admit_isolated_world_id(None)
+
+
+def test_isolated_flag_is_not_a_live_seal_bypass():
+    d = parse_discovery(
+        "https://noema.guru",
+        {"protocol": "agent-protocol/v1", "accepted_seals": [sealed_prompt_hash()], "seal_required": True},
+    )
+    # isolated=True still skips only when the caller also uses an admitted world via client bind
+    assert resolve_seal(d, live_default=True, isolated=False) == sealed_prompt_hash()
+    assert resolve_seal(d, live_default=True, isolated=True, world_id="test.hosted-canonical.ack") is None
+
+
+def test_isolated_posts_test_world_path_without_seal(tmp_path: Path):
+    fake = FakeNoema()
+    origin, httpd, _ = serve_fake(fake)
+    try:
+        save_credential(StoredCredential(access_token="tok.fixture-secret", server=origin), tmp_path)
+        client = NoemaClient(
+            server=origin,
+            config_home=tmp_path,
+            transport="http",
+            isolated=True,
+            world_id="test.hosted-canonical.client-proof",
+            admin_token="aaa.bbb.ccc",
+        )
+        client._credential = load_credential(tmp_path)
+        client.discover()
+        client._bind_gateway(client._credential)
+        entered = client.act(ActionProposal(action="ENTER_WORLD"))
+        assert entered.ok
+        obs = client.observe()
+        assert obs.location and obs.location["name"] == "Grid Anchor"
+        assert client.act(ActionProposal(action="LOOK")).ok
+        assert client.act(ActionProposal(action="WAIT")).ok
+        paths = [c.get("_path") for c in fake.commands]
+        assert all(p == "/v1/operator/test-world/command" for p in paths)
+        assert all(c.get("world_id") == "test.hosted-canonical.client-proof" for c in fake.commands)
+        assert all(c.get("_had_seal") is False for c in fake.commands)
+        assert all(c.get("_had_admin") is True for c in fake.commands)
+        status = client.status()
+        assert status["isolated"] is True
+        assert status["seal"] == "none"
+        assert status["admin_header"] == "present"
+        assert "aaa.bbb.ccc" not in json.dumps(status)
+        assert "tok.fixture-secret" not in json.dumps(status)
+        cred_blob = (tmp_path / "credential.json").read_text()
+        assert "aaa.bbb.ccc" not in cred_blob
+        assert "ADMIN" not in cred_blob
+    finally:
+        httpd.shutdown()
+
+
+def test_isolated_refuses_perihelion_world_id(tmp_path: Path):
+    fake = FakeNoema()
+    origin, httpd, _ = serve_fake(fake)
+    try:
+        save_credential(StoredCredential(access_token="tok.fixture-secret", server=origin), tmp_path)
+        client = NoemaClient(
+            server=origin,
+            config_home=tmp_path,
+            transport="http",
+            isolated=True,
+            world_id="world.perihelion-reach",
+            admin_token="aaa.bbb.ccc",
+        )
+        client._credential = load_credential(tmp_path)
+        client.discover()
+        with pytest.raises(NoemaError) as exc:
+            client._bind_gateway(client._credential)
+        assert exc.value.code == "WORLD_FORBIDDEN"
+        assert fake.commands == []
+    finally:
+        httpd.shutdown()
+
+
+def test_isolated_refuses_raw_operator_secret(tmp_path: Path):
+    fake = FakeNoema()
+    origin, httpd, _ = serve_fake(fake)
+    try:
+        save_credential(StoredCredential(access_token="tok.fixture-secret", server=origin), tmp_path)
+        client = NoemaClient(
+            server=origin,
+            config_home=tmp_path,
+            transport="http",
+            isolated=True,
+            world_id="test.hosted-canonical.client-proof",
+            admin_token="operator-token-value-ok",
+        )
+        client._credential = load_credential(tmp_path)
+        client.discover()
+        with pytest.raises(NoemaAuthError) as exc:
+            client._bind_gateway(client._credential)
+        assert exc.value.code == "ADMIN_REQUIRED"
+        assert fake.commands == []
+    finally:
+        httpd.shutdown()
+
+
+def test_isolated_without_world_id_fails_closed(tmp_path: Path):
+    save_credential(StoredCredential(access_token="tok.fixture-secret", server="https://example.invalid"), tmp_path)
+    client = NoemaClient(server="https://example.invalid", config_home=tmp_path, transport="http", isolated=True)
+    client._credential = load_credential(tmp_path)
+    with pytest.raises(NoemaError) as exc:
+        client._bind_gateway(client._credential)
+    assert exc.value.code == "WORLD_FORBIDDEN"

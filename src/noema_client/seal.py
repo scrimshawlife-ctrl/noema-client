@@ -11,6 +11,7 @@ from pathlib import Path
 
 from noema_client.discovery import Discovery
 from noema_client.errors import NoemaSealError
+from noema_client.isolated import is_isolated_world
 
 PROMPT_PATH = Path(__file__).with_name("data") / "sealed-prompt-s0.txt"
 FORBIDDEN_FLAG_NAMES = ("goal", "prompt", "system", "brief", "hidden_prompt")
@@ -31,9 +32,18 @@ def refused_play_flag(namespace: object) -> str | None:
     return None
 
 
-def resolve_seal(discovery: Discovery | None, *, live_default: bool, isolated: bool) -> str | None:
-    """Isolated worlds skip the seal. Live agents send a catalog-accepted hash."""
-    if isolated:
+def resolve_seal(
+    discovery: Discovery | None,
+    *,
+    live_default: bool,
+    isolated: bool,
+    world_id: str | None = None,
+) -> str | None:
+    """Admitted isolated worlds skip the seal. Live agents send a catalog-accepted hash.
+
+    `--isolated` without an admitted test.hosted-canonical.* id is not a live-seal bypass.
+    """
+    if isolated or is_isolated_world(world_id):
         return None
     accepted = list(discovery.accepted_seals) if discovery else []
     published = sealed_prompt_hash()

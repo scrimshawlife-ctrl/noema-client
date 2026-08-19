@@ -90,11 +90,21 @@ class FakeNoema:
             if code in self.pending:
                 return 200, {"status": "authorization_pending", "interval": 0}
             return 400, {"status": "expired"}
-        if method == "POST" and path == "/v1/command":
+        if method == "POST" and path in {"/v1/command", "/v1/operator/test-world/command"}:
+            isolated = path.endswith("/test-world/command")
             auth = headers.get("Authorization") or headers.get("authorization") or ""
             if not auth.startswith("Bearer "):
                 return 401, {"ok": False, "error": {"code": "NOT_AUTHORIZED", "message": "missing bearer"}}
-            if self.require_seal_on_command:
+            if isolated:
+                admin = headers.get("X-Noema-Admin-Token") or headers.get("x-noema-admin-token") or ""
+                if admin.count(".") != 2 or not admin:
+                    return 401, {"ok": False, "error": {"code": "NOT_AUTHORIZED", "message": "signed admin jwt required"}}
+                world_id = str(body.get("world_id") or "")
+                if world_id == "world.perihelion-reach" or world_id.startswith("world.perihelion") or world_id == "world-01":
+                    return 403, {"ok": False, "error": {"code": "WORLD_FORBIDDEN", "message": "not admitted"}}
+                if not world_id.startswith("test.hosted-canonical."):
+                    return 403, {"ok": False, "error": {"code": "WORLD_FORBIDDEN", "message": "not admitted"}}
+            elif self.require_seal_on_command:
                 seal = headers.get("X-Noema-Seal") or headers.get("x-noema-seal")
                 if seal not in self.accepted_seals:
                     return 403, {"ok": False, "error": {"code": "SEAL_REQUIRED", "message": "seal required"}}
@@ -102,7 +112,11 @@ class FakeNoema:
             if idem in self.seen_idem:
                 return 200, self.seen_idem[idem]
             command = str(body.get("command") or "").upper()
-            self.commands.append(body)
+            rec = dict(body)
+            rec["_path"] = path
+            rec["_had_seal"] = bool(headers.get("X-Noema-Seal") or headers.get("x-noema-seal"))
+            rec["_had_admin"] = bool(headers.get("X-Noema-Admin-Token") or headers.get("x-noema-admin-token"))
+            self.commands.append(rec)
             if self.world_status == "PAUSED" and command not in {"LOOK", "OBSERVE", "WAIT"}:
                 return 409, {"ok": False, "error": {"code": "WORLD_PAUSED"}, "world_status": "PAUSED"}
             if self.world_status == "INCIDENT" and command not in {"LOOK", "OBSERVE"}:

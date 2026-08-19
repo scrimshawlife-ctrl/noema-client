@@ -122,6 +122,7 @@ class HttpGateway:
         command_path: str = "/v1/command",
         world_id: str | None = None,
         seal: str | None = None,
+        admin_token: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self._tokens = token_provider
@@ -134,6 +135,7 @@ class HttpGateway:
             self.command_url = f"{self.base_url}{self.command_path}"
         self.world_id = world_id
         self.seal = seal
+        self._admin_token = admin_token
         self.last_fallback_note: str | None = None
 
     def send_command(
@@ -158,9 +160,13 @@ class HttpGateway:
                     "arguments": arguments or {},
                     "client": {"type": "agent", "runtime": self.runtime},
                 }
+                if self.world_id:
+                    body["world_id"] = self.world_id
                 extra: dict[str, str] = {}
                 if self.seal:
                     extra["X-Noema-Seal"] = self.seal
+                if self._admin_token:
+                    extra["X-Noema-Admin-Token"] = self._admin_token
                 payload = call_http(self._http, "POST", self.command_url, body, self._tokens.reveal(), extra)
                 last_timeout = None
                 break
