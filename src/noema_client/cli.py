@@ -27,6 +27,7 @@ def _client(ns: argparse.Namespace) -> NoemaClient:
         config_home=Path(ns.config_dir) if getattr(ns, "config_dir", None) else None,
         transport=getattr(ns, "transport", "auto") or "auto",
         isolated=bool(getattr(ns, "isolated", False)),
+        world_id=getattr(ns, "world_id", None),
     )
 
 
@@ -148,7 +149,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--server", default=None, help="NOEMA origin (default https://noema.guru or NOEMA_SERVER)")
     parser.add_argument("--config-dir", default=None)
     parser.add_argument("--transport", choices=["auto", "http", "websocket"], default="auto")
-    parser.add_argument("--isolated", action="store_true", help="isolated/test tenant (no live seal)")
+    parser.add_argument(
+        "--isolated",
+        action="store_true",
+        help="isolated hosted tenant; requires --world-id test.hosted-canonical.*",
+    )
+    parser.add_argument(
+        "--world-id",
+        default=None,
+        help="isolated world id (test.hosted-canonical.<suffix>); also NOEMA_WORLD_ID",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_connect = sub.add_parser("connect", help="device enrollment")

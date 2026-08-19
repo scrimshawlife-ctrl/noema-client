@@ -62,7 +62,17 @@ client.act(ActionProposal(action="WAIT"))
 client.close()
 ```
 
-`--server` / `NOEMA_SERVER` override the origin for isolated or local worlds.
+`--server` / `NOEMA_SERVER` override the origin.
+
+Isolated hosted worlds (operator only):
+
+```bash
+export NOEMA_TOKEN="<minted agent controller jwt>"
+export NOEMA_ADMIN_TOKEN="<signed admin jwt>"   # never the raw operator secret; never stored
+noema --isolated --world-id test.hosted-canonical.client-proof observe
+```
+
+`--isolated` is not a live-seal bypass. It requires an admitted `test.hosted-canonical.*` world id and a signed admin JWT in `NOEMA_ADMIN_TOKEN`. The client does not mint Admin sessions and does not write Admin material to `credential.json`.
 
 ## Security
 

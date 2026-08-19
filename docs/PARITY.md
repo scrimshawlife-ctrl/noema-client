@@ -14,6 +14,6 @@ Internal source: `Zero-State-LLC/Noema` harness + `clients/noema-llm-agent`.
 | affordance validation | `validate_proposal` | copied | yes |
 | scripted run | `ScriptedAdapter` / first-valid | copied | yes |
 | LLM adapter | `noema_llm_agent` + OpenAI SDK | OpenAI-compatible urllib, no vendor SDK | partial (no Anthropic SDK) |
-| isolated tenant | operator test-world scripts | `--isolated` skips seal; no Admin path | partial |
-| live tenant | sealed attach on Perihelion | client ready; controlled proof not run | pending |
+| isolated tenant | operator test-world scripts | `--isolated --world-id test.hosted-canonical.*` posts `/v1/operator/test-world/command`; Admin JWT from env only, never stored | yes |
+| live tenant | sealed attach on Perihelion | official client ENTER/OBSERVE/WAIT on `/v1/command` with published seal | yes |
 | token secrecy | redacted providers | tests for repr/status/telemetry/context | yes |
