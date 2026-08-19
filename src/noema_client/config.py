@@ -32,6 +32,7 @@ class StoredCredential:
     server: str = DEFAULT_SERVER
     world_id: str | None = None
     protocol: str = "agent-protocol/v1"
+    resume_token: str | None = None
 
     def __repr__(self) -> str:
         return "StoredCredential(<redacted>)"
@@ -73,6 +74,7 @@ def load_credential(directory: Path | None = None) -> StoredCredential | None:
         server=str(data.get("server") or server),
         world_id=data.get("world_id"),
         protocol=str(data.get("protocol") or "agent-protocol/v1"),
+        resume_token=data.get("resume_token"),
     )
 
 
