@@ -16,6 +16,7 @@ from noema_client.policy import ClientPolicy
 from noema_client.seal import refused_play_flag, resolve_seal, sealed_prompt_hash
 from noema_client.transport import default_http
 from fake_server import FakeNoema, serve_fake
+from fake_ws import FakeWsServer
 
 
 def test_discovery_parse():
@@ -336,3 +337,104 @@ def test_isolated_without_world_id_fails_closed(tmp_path: Path):
     with pytest.raises(NoemaError) as exc:
         client._bind_gateway(client._credential)
     assert exc.value.code == "WORLD_FORBIDDEN"
+
+
+def test_websocket_act_observe_and_resume(tmp_path: Path):
+    fake_http = FakeNoema()
+    origin, httpd, _ = serve_fake(fake_http)
+    ws = FakeWsServer()
+    try:
+        save_credential(StoredCredential(access_token="tok.fixture-secret", server=origin), tmp_path)
+        client = NoemaClient(
+            server=origin,
+            config_home=tmp_path,
+            transport="websocket",
+            ws_connect=ws.connect,
+        )
+        client._credential = load_credential(tmp_path)
+        client.discover()
+        client._bind_gateway(client._credential)
+        assert client.session.transport == "websocket"
+        entered = client.act(ActionProposal(action="ENTER_WORLD"))
+        assert entered.ok
+        obs = client.observe()
+        assert obs.location and obs.location["name"] == "Grid Anchor"
+        waited = client.act(ActionProposal(action="WAIT"))
+        assert waited.ok
+        types = [f.get("type") for f in ws.frames]
+        assert "HELLO" in types
+        assert "AUTH" in types
+        assert "ACT" in types
+        assert "OBSERVE" in types
+        status = client.status()
+        assert status["transport"] == "websocket"
+        assert status["resume"] == "stored"
+        blob = json.dumps(status)
+        assert "resume.fixture.1" not in blob
+        cred = load_credential(tmp_path)
+        assert cred and cred.resume_token == "resume.fixture.1"
+        assert "resume.fixture.1" not in repr(cred)
+        client.disconnect()
+        assert ws.closed >= 1
+
+        again = NoemaClient(
+            server=origin,
+            config_home=tmp_path,
+            transport="websocket",
+            ws_connect=ws.connect,
+        )
+        again._credential = load_credential(tmp_path)
+        again.discover()
+        again._bind_gateway(again._credential)
+        hello_bodies = [f.get("body") or {} for f in ws.frames if f.get("type") == "HELLO"]
+        assert any(b.get("resume_token") == "resume.fixture.1" for b in hello_bodies)
+        assert again.act(ActionProposal(action="LOOK")).ok
+        again.disconnect(forget=True)
+        assert load_credential(tmp_path) is None
+    finally:
+        httpd.shutdown()
+
+
+def test_websocket_reconnects_after_drop(tmp_path: Path):
+    fake_http = FakeNoema()
+    origin, httpd, _ = serve_fake(fake_http)
+    ws = FakeWsServer()
+    ws.drop_after = 1
+    try:
+        save_credential(
+            StoredCredential(access_token="tok.fixture-secret", server=origin, resume_token="resume.fixture.1"),
+            tmp_path,
+        )
+        ws.resume_tokens["resume.fixture.1"] = {"player_id": "player.fixture"}
+        client = NoemaClient(
+            server=origin,
+            config_home=tmp_path,
+            transport="websocket",
+            ws_connect=ws.connect,
+        )
+        client._credential = load_credential(tmp_path)
+        client.discover()
+        client._bind_gateway(client._credential)
+        first = client.act(ActionProposal(action="LOOK"))
+        assert first.ok
+        second = client.act(ActionProposal(action="WAIT"))
+        assert second.ok
+        assert ws.connections >= 2
+    finally:
+        httpd.shutdown()
+
+
+def test_isolated_refuses_websocket_transport(tmp_path: Path):
+    save_credential(StoredCredential(access_token="tok.fixture-secret", server="https://example.invalid"), tmp_path)
+    client = NoemaClient(
+        server="https://example.invalid",
+        config_home=tmp_path,
+        transport="websocket",
+        isolated=True,
+        world_id="test.hosted-canonical.client-proof",
+        admin_token="aaa.bbb.ccc",
+    )
+    client._credential = load_credential(tmp_path)
+    with pytest.raises(NoemaError) as exc:
+        client._bind_gateway(client._credential)
+    assert exc.value.code == "WS_ISOLATED"

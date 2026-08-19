@@ -20,6 +20,20 @@ class TokenProvider(Protocol):
     def reveal(self) -> str: ...
 
 
+class CommandTransport(Protocol):
+    def send_command(
+        self,
+        command: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
+        retries: int = 1,
+    ) -> CommandResult: ...
+
+    def close(self) -> None: ...
+
+
 def _ipv4_opener() -> urllib.request.OpenerDirector:
     orig = socket.getaddrinfo
 
@@ -198,3 +212,6 @@ class HttpGateway:
             world_status=payload.get("world_status") if isinstance(payload.get("world_status"), str) else None,
             raw=payload,
         )
+
+    def close(self) -> None:
+        return

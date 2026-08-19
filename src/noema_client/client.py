@@ -24,7 +24,7 @@ from noema_client.config import (
     save_server,
 )
 from noema_client.discovery import Discovery, discover
-from noema_client.errors import FailureClass, NoemaAuthError, NoemaError, raise_for_failure
+from noema_client.errors import FailureClass, NoemaAuthError, NoemaError, NoemaProtocolError, raise_for_failure
 from noema_client.isolated import (
     ISOLATED_COMMAND_PATH,
     admit_isolated_world_id,
@@ -39,7 +39,7 @@ from noema_client.runner import Runner
 from noema_client.seal import command_headers, refused_play_flag, resolve_seal
 from noema_client.session import Session
 from noema_client.telemetry import Telemetry
-from noema_client.transport import HttpGateway, default_http
+from noema_client.transport import CommandTransport, HttpGateway, default_http
 from noema_client.types import ActionProposal, CommandResult, Observation
 
 
@@ -56,6 +56,7 @@ class NoemaClient:
         admin_token: str | None = None,
         runtime: str = "noema-client",
         policy: ClientPolicy | None = None,
+        ws_connect: Callable[..., Any] | None = None,
     ) -> None:
         self.config_home = Path(config_home) if config_home else config_dir()
         self.server = (server or load_server(self.config_home)).rstrip("/")
@@ -69,15 +70,18 @@ class NoemaClient:
         self._admin_token = admin_token or os.environ.get("NOEMA_ADMIN_TOKEN") or None
         self.runtime = runtime
         self.policy = policy or ClientPolicy()
+        self._ws_connect = ws_connect
         self.telemetry = Telemetry()
         self.discovery: Discovery | None = None
         self.session = Session(server=self.server, transport="http")
         self._credential: StoredCredential | None = cred
         if self._credential:
             self.telemetry.remember_secret(self._credential.access_token)
+            if self._credential.resume_token:
+                self.telemetry.remember_secret(self._credential.resume_token)
         if self._admin_token:
             self.telemetry.remember_secret(self._admin_token)
-        self._gateway: HttpGateway | None = None
+        self._gateway: CommandTransport | None = None
         self.observation: Observation | None = None
         self.seal: str | None = None
 
@@ -86,7 +90,11 @@ class NoemaClient:
 
     def _secrets(self) -> list[str]:
         cred = self._credential
-        return collect_secrets(cred.access_token if cred else None)
+        return collect_secrets(
+            cred.access_token if cred else None,
+            cred.resume_token if cred else None,
+            self._admin_token,
+        )
 
     def discover(self) -> Discovery:
         self.discovery = discover(self.server, self._http)
@@ -124,6 +132,7 @@ class NoemaClient:
             server=self.server,
             world_id=self.world_id,
             protocol=self.session.protocol,
+            resume_token=None,
         )
         save_credential(cred, self.config_home)
         save_server(self.server, self.config_home)
@@ -134,6 +143,26 @@ class NoemaClient:
         self.session.controller_id = cred.controller_id
         self.telemetry.record(event="connect", player_id=cred.player_id, transport=self.session.transport)
         return cred
+
+    def _http_gateway(self, cred: StoredCredential, command_path: str, world_id: str | None, admin_token: str | None) -> HttpGateway:
+        return HttpGateway(
+            self.server,
+            StaticTokenProvider(cred.access_token),
+            http=self._http,
+            runtime=self.runtime,
+            command_path=command_path,
+            world_id=world_id if self.isolated else None,
+            seal=self.seal,
+            admin_token=admin_token,
+        )
+
+    def _persist_resume(self, cred: StoredCredential, resume_token: str | None) -> None:
+        if not resume_token:
+            return
+        self.telemetry.remember_secret(resume_token)
+        cred.resume_token = resume_token
+        self.session.resume = "stored"
+        save_credential(cred, self.config_home)
 
     def _bind_gateway(self, cred: StoredCredential) -> None:
         command_path = "/v1/command"
@@ -150,40 +179,50 @@ class NoemaClient:
             parsed = urlparse(self.discovery.command_uri)
             command_path = parsed.path or "/v1/command"
         chosen = self.transport_pref
-        if chosen == "auto":
+        if self.isolated:
+            if chosen == "websocket":
+                raise NoemaError("WS_ISOLATED", "isolated worlds use HTTP /v1/operator/test-world/command")
+            self.session.transport = "http"
+            self._gateway = self._http_gateway(cred, command_path, world_id, admin_token)
+            self.session.seal_sent = False
+            self.session.resume = "none"
+            return
+        ws_ok = chosen in {"auto", "websocket"}
+        advertised = "websocket" in (self.discovery.transports if self.discovery else ["websocket"])
+        if ws_ok and (advertised or chosen == "websocket" or self._ws_connect is not None):
             ws = WebSocketGateway(
                 derive_ws_url(self.discovery.websocket_uri if self.discovery else self.server),
                 StaticTokenProvider(cred.access_token),
                 seal=self.seal,
+                resume_token=cred.resume_token,
+                connect_factory=self._ws_connect,
             )
-            if ws.available() and "websocket" in (self.discovery.transports if self.discovery else ["websocket"]):
+            if ws.available():
                 try:
                     ws.connect_session()
+                    self._gateway = ws
                     self.session.transport = "websocket"
-                    self.telemetry.record(event="transport", transport="websocket")
+                    self.session.resume = "stored" if ws.resume_token else "none"
+                    self._persist_resume(cred, ws.resume_token)
+                    self.telemetry.record(event="transport", transport="websocket", resumed=ws.resumed)
+                    self.session.seal_sent = bool(self.seal)
+                    if ws.player_id:
+                        self.session.player_id = str(ws.player_id)
+                    if ws.controller_id:
+                        self.session.controller_id = str(ws.controller_id)
+                    return
                 except Exception:
-                    self.session.transport = "http"
+                    if chosen == "websocket":
+                        raise
                     self.telemetry.record(event="transport", transport="http", fallback="websocket_failed")
-            else:
-                self.session.transport = "http"
-                self.telemetry.record(event="transport", transport="http", fallback="ws_unavailable")
-        elif chosen == "websocket":
-            self.session.transport = "websocket"
-        else:
-            self.session.transport = "http"
-        self._gateway = HttpGateway(
-            self.server,
-            StaticTokenProvider(cred.access_token),
-            http=self._http,
-            runtime=self.runtime,
-            command_path=command_path,
-            world_id=world_id if self.isolated else None,
-            seal=self.seal,
-            admin_token=admin_token,
-        )
+            elif chosen == "websocket":
+                raise NoemaProtocolError("WS_UNAVAILABLE", "websockets package not installed", failure=FailureClass.PROTOCOL)
+        self.session.transport = "http"
+        self._gateway = self._http_gateway(cred, command_path, world_id, admin_token)
         self.session.seal_sent = bool(self.seal)
+        self.session.resume = "stored" if cred.resume_token else "none"
 
-    def _require_gateway(self) -> HttpGateway:
+    def _require_gateway(self) -> CommandTransport:
         if self._gateway is None:
             cred = self._credential or load_credential(self.config_home)
             if not cred:
@@ -225,7 +264,7 @@ class NoemaClient:
             latency_ms=None,
             protocol=self.session.protocol,
             transport=self.session.transport,
-            client_version="0.1.1",
+            client_version="0.1.2",
         )
         return result
 
@@ -262,6 +301,7 @@ class NoemaClient:
             "seal": "sent" if self.session.seal_sent or self.seal else "none",
             "credential": "stored" if cred else "missing",
             "admin_header": "present" if self._admin_token else "missing",
+            "resume": self.session.resume,
             "cycle": self.session.cycle,
         }
 
@@ -289,10 +329,17 @@ class NoemaClient:
 
     def disconnect(self, *, forget: bool = False) -> None:
         self.session.connected = False
+        gw = self._gateway
         self._gateway = None
+        if gw is not None:
+            try:
+                gw.close()
+            except Exception:
+                pass
         if forget:
             clear_credential(self.config_home)
             self._credential = None
+            self.session.resume = "none"
         self.telemetry.record(event="disconnect", forget=forget)
 
     def close(self) -> None:

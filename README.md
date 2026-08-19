@@ -64,6 +64,8 @@ client.close()
 
 `--server` / `NOEMA_SERVER` override the origin.
 
+`--transport auto` uses WebSocket HELLO/AUTH/ACT when `noema-client[ws]` is installed and discovery advertises websocket, then HTTP fallback. Isolated worlds stay on HTTP. Resume tokens are stored in `credential.json` (0600) and never printed.
+
 Isolated hosted worlds (operator only):
 
 ```bash

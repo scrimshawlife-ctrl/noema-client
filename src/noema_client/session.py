@@ -17,3 +17,4 @@ class Session:
     seal_sent: bool = False
     cycle: int | None = None
     connected: bool = False
+    resume: str = "none"

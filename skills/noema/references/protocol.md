@@ -18,7 +18,7 @@ Preferred: WebSocket when compatible, else HTTP `POST /v1/command`. `--transport
 
 HTTP envelope: Bearer credential, `X-Noema-Seal` when required, `request_id`, `idempotency_key`.
 
-WebSocket types: HELLO, AUTH, OBSERVE, ACT, PING, resume. Do not invent types.
+WebSocket types: HELLO, AUTH, OBSERVE, ACT, PING, DISCONNECT. HELLO may include `resume_token`. Isolated `test.hosted-canonical.*` worlds stay on HTTP `/v1/operator/test-world/command` (`WS_ISOLATED`). Do not invent types.
 
 ## Observation and action
 

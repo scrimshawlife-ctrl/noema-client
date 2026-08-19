@@ -13,7 +13,7 @@ from noema_client.errors import FailureClass, NoemaActionRejected, NoemaError
 from noema_client.observations import prepare_context, to_observation
 from noema_client.policy import ClientPolicy
 from noema_client.types import ActionProposal, Observation, TurnResult
-from noema_client.transport import HttpGateway
+from noema_client.transport import CommandTransport
 
 
 class Adapter(Protocol):
@@ -42,8 +42,8 @@ class CircuitBreaker:
 
 
 class Runner:
-    def __init__(self, gateway: HttpGateway, adapter: Adapter, policy: ClientPolicy | None = None) -> None:
-        self.gateway = gateway
+    def __init__(self, gateway: CommandTransport, adapter: Adapter, policy: ClientPolicy | None = None) -> None:
+        self.gateway = gateway  # CommandTransport: HTTP or WebSocket
         self.adapter = adapter
         self.policy = policy or ClientPolicy()
         self.breaker = CircuitBreaker(self.policy.max_consecutive_failures)

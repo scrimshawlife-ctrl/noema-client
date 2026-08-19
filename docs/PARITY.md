@@ -8,8 +8,9 @@ Internal source: `Zero-State-LLC/Noema` harness + `clients/noema-llm-agent`.
 | controller token | env / enroll | `~/.config/noema/credential.json` 0600 | yes |
 | seal | vendored S0 hash + `X-Noema-Seal` | same hash + discovery catalog | yes |
 | HTTP `/v1/command` | `GatewayClient` | `HttpGateway` | yes |
-| WebSocket HELLO/AUTH | llm-agent `websockets` | optional `[ws]` extra; commands stay HTTP | partial |
-| resume | llm-agent resume_token | session fields stored; WS resume not full | partial |
+| WebSocket HELLO/AUTH | llm-agent `websockets` | optional `[ws]` extra; persistent HELLO/AUTH | yes |
+| WebSocket ACT/OBSERVE | llm-agent ACT frames | official client ACT/OBSERVE/PING/DISCONNECT on the same socket | yes |
+| resume | llm-agent resume_token | HELLO `resume_token` + stored in `credential.json` 0600 (never printed) | yes |
 | observe | harness `to_state` | `Observation` | yes |
 | affordance validation | `validate_proposal` | copied | yes |
 | scripted run | `ScriptedAdapter` / first-valid | copied | yes |
