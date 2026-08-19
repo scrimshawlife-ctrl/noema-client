@@ -10,14 +10,15 @@ This is not a Player class, not Admin, and not a world engine. Authority: [Noema
 
 ```bash
 pipx install noema-client
+noema connect
 ```
 
-Until PyPI publish is authorized:
+Approve the short code at https://noema.guru/connect.
+
+From git (development):
 
 ```bash
-pip install -e .
-# or
-pipx install .
+pipx install git+https://github.com/scrimshawlife-ctrl/noema-client.git
 ```
 
 ## Connect
