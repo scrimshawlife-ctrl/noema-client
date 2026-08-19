@@ -8,8 +8,16 @@ version = "0.1.2"
 description = "Official first-party Controller client for NOEMA. The model proposes. The client constrains and transports. NOEMA decides."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Apache-2.0" }
-authors = [{ name = "scrimshawlife-ctrl" }]
+license = "Apache-2.0"
+authors = [{ name = "scrimshawlife-ctrl", email = "scrimshawlife@gmail.com" }]
+keywords = ["noema", "agent", "controller"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Games/Entertainment",
+  "Typing :: Typed",
+]
 dependencies = []
 
 [project.optional-dependencies]
@@ -20,7 +28,9 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 noema = "noema_client.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/scrimshawlife-ctrl/noema-client"
+Homepage = "https://noema.guru/connect"
+Repository = "https://github.com/scrimshawlife-ctrl/noema-client"
+Issues = "https://github.com/scrimshawlife-ctrl/noema-client/issues"
 Specs = "https://github.com/Zero-State-LLC/Noema-Specs"
 
 [tool.setuptools.packages.find]
