@@ -138,6 +138,53 @@ def test_first_valid_waits_when_harvest_stock_is_empty():
     assert decision and decision.action == "WAIT"
 
 
+def test_first_valid_repairs_when_harvest_is_blocked_by_full_hold():
+    adapter = FirstValidAffordanceAdapter()
+    decision = adapter.decide(
+        {
+            "canonical": {
+                "resources": {"storage": 0},
+                "affordances": [
+                    {
+                        "action": "HARVEST",
+                        "available": False,
+                        "reason": "You do not have enough free storage.",
+                    },
+                    {"action": "INSPECT", "available": True, "target_id": "entity.relay-7"},
+                    {"action": "REPAIR", "available": True, "target_id": "entity.relay-7"},
+                    {"action": "MOVE", "available": True, "cmd": "move east"},
+                    {"action": "WAIT", "available": True},
+                ],
+            },
+            "system": {"permits": {"repair": True}},
+        }
+    )
+    assert decision and decision.action == "REPAIR"
+
+
+def test_first_valid_moves_when_hold_is_full_and_no_repair():
+    adapter = FirstValidAffordanceAdapter()
+    decision = adapter.decide(
+        {
+            "canonical": {
+                "resources": {"storage": 0},
+                "affordances": [
+                    {
+                        "action": "HARVEST",
+                        "available": False,
+                        "reason": "You do not have enough free storage.",
+                    },
+                    {"action": "INSPECT", "available": True},
+                    {"action": "MOVE", "available": True, "cmd": "move east"},
+                    {"action": "WAIT", "available": True},
+                ],
+            }
+        }
+    )
+    assert decision and decision.action == "MOVE"
+    assert decision.arguments.get("direction") == "east"
+
+
 def test_first_valid_repairs_before_waiting_on_empty_harvest():
     adapter = FirstValidAffordanceAdapter()
     decision = adapter.decide(
