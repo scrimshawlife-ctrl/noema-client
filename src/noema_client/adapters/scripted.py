@@ -24,6 +24,22 @@ class ScriptedAdapter:
         return self._steps.pop(0)
 
 
+def harvest_stock_empty(canonical: dict[str, Any]) -> bool:
+    harvests: list[dict[str, Any]] = []
+    for aff in canonical.get("affordances") or []:
+        if not isinstance(aff, dict):
+            continue
+        action = str(aff.get("operation") or aff.get("action") or "").upper()
+        if action in {"HARVEST", "COMMIT.HARVEST"}:
+            harvests.append(aff)
+    if not harvests:
+        return False
+    return all(
+        (not aff.get("available", True)) and "stock" in str(aff.get("reason") or "").lower()
+        for aff in harvests
+    )
+
+
 def _quiet_room(canonical: dict[str, Any]) -> bool:
     for ent in canonical.get("entities") or []:
         if not isinstance(ent, dict):
@@ -51,6 +67,14 @@ class FirstValidAffordanceAdapter:
     def decide(self, context: dict[str, Any]) -> ActionProposal | None:
         canonical = context.get("canonical") or {}
         policy = (context.get("system") or {}).get("permits") or {}
+        if harvest_stock_empty(canonical):
+            for aff in canonical.get("affordances") or []:
+                if not aff.get("available", True):
+                    continue
+                action = str(aff.get("action") or aff.get("operation") or "").upper()
+                if action == "REPAIR" and policy.get("repair") is not False:
+                    return ActionProposal(action="REPAIR", target_id=aff.get("target_id"))
+            return ActionProposal(action="WAIT")
         if _quiet_room(canonical):
             return ActionProposal(action="WAIT")
         for aff in canonical.get("affordances") or []:

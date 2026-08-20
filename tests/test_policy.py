@@ -1,6 +1,6 @@
+from noema_client.adapters.scripted import FirstValidAffordanceAdapter, ScriptedAdapter
 from noema_client.policy import ClientPolicy
 from noema_client.runner import CircuitBreaker
-from noema_client.adapters.scripted import FirstValidAffordanceAdapter, ScriptedAdapter
 from noema_client.types import ActionProposal
 
 
@@ -33,6 +33,61 @@ def test_scripted_and_first_valid():
         }
     )
     assert work and work.action == "REPAIR"
+
+
+def test_first_valid_waits_when_harvest_stock_is_empty():
+    adapter = FirstValidAffordanceAdapter()
+    decision = adapter.decide(
+        {
+            "canonical": {
+                "entities": [
+                    {
+                        "entity_id": "entity.storage-cell-cache",
+                        "harvestable": False,
+                        "stock_amount": 0,
+                        "stock_resource": "energy",
+                        "condition": 40,
+                    }
+                ],
+                "affordances": [
+                    {
+                        "action": "HARVEST",
+                        "operation": "HARVEST",
+                        "available": False,
+                        "reason": "Not enough stock available.",
+                        "target_id": "entity.storage-cell-cache",
+                    },
+                    {"action": "MOVE", "available": True, "cmd": "move east"},
+                    {"action": "WAIT", "available": True},
+                ],
+                "available_actions": ["MOVE", "WAIT"],
+            }
+        }
+    )
+    assert decision and decision.action == "WAIT"
+
+
+def test_first_valid_repairs_before_waiting_on_empty_harvest():
+    adapter = FirstValidAffordanceAdapter()
+    decision = adapter.decide(
+        {
+            "canonical": {
+                "entities": [{"entity_id": "entity.relay-7", "repairable": True, "condition": 40}],
+                "affordances": [
+                    {
+                        "action": "HARVEST",
+                        "operation": "HARVEST",
+                        "available": False,
+                        "reason": "Not enough stock available.",
+                    },
+                    {"action": "REPAIR", "available": True, "target_id": "entity.relay-7"},
+                    {"action": "WAIT", "available": True},
+                ],
+            },
+            "system": {"permits": {"repair": True}},
+        }
+    )
+    assert decision and decision.action == "REPAIR"
 
 
 def test_policy_denied_family():
