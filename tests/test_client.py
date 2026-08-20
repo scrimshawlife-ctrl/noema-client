@@ -438,3 +438,68 @@ def test_isolated_refuses_websocket_transport(tmp_path: Path):
     with pytest.raises(NoemaError) as exc:
         client._bind_gateway(client._credential)
     assert exc.value.code == "WS_ISOLATED"
+
+
+def test_play_continues_after_settlement_race(tmp_path: Path):
+    from noema_client.adapters.scripted import ScriptedAdapter
+    from noema_client.errors import FailureClass
+    from noema_client.types import CommandResult
+
+    class Seq:
+        def __init__(self) -> None:
+            self.waits = 0
+
+        def send_command(self, command, arguments=None, **kwargs):
+            cmd = str(command).upper()
+            if cmd in {"OBSERVE", "LOOK", "ENTER_WORLD"}:
+                return CommandResult(
+                    ok=True,
+                    observation={"world_status": "ACTIVE", "available_actions": ["WAIT"]},
+                    error=None,
+                    settled=True,
+                    http_status=200,
+                    failure=None,
+                    idempotency_key="k",
+                    request_id="r",
+                    world_status="ACTIVE",
+                )
+            self.waits += 1
+            if self.waits == 1:
+                return CommandResult(
+                    ok=False,
+                    observation=None,
+                    error={"code": "STALE_HEAD", "message": "That action lost the settlement race. Observe and try again."},
+                    settled=False,
+                    http_status=409,
+                    failure=FailureClass.ACTION_REJECTED,
+                    idempotency_key="k",
+                    request_id="r",
+                    world_status="ACTIVE",
+                )
+            return CommandResult(
+                ok=True,
+                observation={"world_status": "ACTIVE", "available_actions": ["WAIT"], "consequence": "waited"},
+                error=None,
+                settled=True,
+                http_status=200,
+                failure=None,
+                idempotency_key="k",
+                request_id="r",
+                world_status="ACTIVE",
+            )
+
+        def close(self) -> None:
+            return None
+
+    client = NoemaClient(server="https://example.invalid", config_home=tmp_path, transport="http")
+    client._gateway = Seq()
+    turns = client.play(
+        max_actions=3,
+        adapter=ScriptedAdapter([ActionProposal(action="WAIT"), ActionProposal(action="WAIT"), ActionProposal(action="WAIT")]),
+        enter=False,
+    )
+    assert len(turns) == 3
+    assert turns[0].ok is False
+    assert turns[0].stopped is False
+    assert turns[1].ok is True
+    assert turns[2].ok is True
