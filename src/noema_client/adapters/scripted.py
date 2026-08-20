@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from noema_client.affordances import proposal_from_affordance
 from noema_client.types import ActionProposal
 
 _DIRECTIONS = ("north", "south", "east", "west", "up", "down", "in", "out")
@@ -129,13 +130,15 @@ class FirstValidAffordanceAdapter:
                 continue
             if action == "HARVEST" and policy.get("harvest") is False:
                 continue
-            args: dict[str, Any] = {}
-            if action == "MOVE":
-                direction = move_direction(aff)
+            proposal = proposal_from_affordance(aff)
+            if proposal is None:
+                continue
+            if action == "MOVE" or proposal.action == "MOVE":
+                direction = move_direction(aff) or proposal.arguments.get("direction")
                 if not direction:
                     continue
-                args["direction"] = direction
-            return ActionProposal(action=action, target_id=aff.get("target_id"), arguments=args)
+                proposal.arguments["direction"] = direction
+            return proposal
         available = list(canonical.get("available_actions") or [])
         if "WAIT" in available or _quiet_room(canonical):
             return ActionProposal(action="WAIT")

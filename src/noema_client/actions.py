@@ -21,20 +21,47 @@ _DIRECT = {
     "TRADE": ("TRADE", True),
 }
 
+_BUILD = {
+    "CONSTRUCT",
+    "DISMANTLE",
+    "UPGRADE",
+    "REPURPOSE",
+    "RESTORE",
+    "VEST",
+    "SHARE",
+    "CONNECT",
+}
+
 _COMMIT = {
     "REPAIR": "REPAIR",
     "HARVEST": "HARVEST",
     "ORG_CREATE": "ORG_CREATE",
     "ORG_MEMBER_ADD": "ORG_MEMBER_ADD",
     "ORG_MEMBER_REMOVE": "ORG_MEMBER_REMOVE",
+    "ORG_OFFICE_CREATE": "ORG_OFFICE_CREATE",
+    "ORG_OFFICE_ASSIGN": "ORG_OFFICE_ASSIGN",
+    "ORG_OFFICE_VACATE": "ORG_OFFICE_VACATE",
+    "ORG_OFFICE_RETIRE": "ORG_OFFICE_RETIRE",
+    "ORG_OFFICE_ACT": "ORG_OFFICE_ACT",
+    "ORG_EMERGENCY_ACTIVATE": "ORG_EMERGENCY_ACTIVATE",
+    "ORG_EMERGENCY_REVOKE": "ORG_EMERGENCY_REVOKE",
+    "ORG_SUCCESSION_DESIGNATE": "ORG_SUCCESSION_DESIGNATE",
+    "ORG_SUCCESSION_CONSENT": "ORG_SUCCESSION_CONSENT",
+    "ORG_SUCCESSION_RULE": "ORG_SUCCESSION_RULE",
     "CONTEST": "CONTEST_DECLARE",
     "CONTEST_DECLARE": "CONTEST_DECLARE",
     "CONTEST_DEFEND": "CONTEST_DEFEND",
+    "CONTEST_WITHDRAW": "CONTEST_WITHDRAW",
     "AGREEMENT": "AGREEMENT_FORM",
     "AGREEMENT_FORM": "AGREEMENT_FORM",
     "AGREEMENT_TERMINATE": "AGREEMENT_TERMINATE",
     "ACCESS": "ACCESS_POLICY",
     "ACCESS_POLICY": "ACCESS_POLICY",
+    "FOCUS": "FOCUS",
+    "ATTEST": "ATTEST",
+    "RECONSTRUCT": "RECONSTRUCT",
+    "RECONSTRUCT_PUBLISH": "RECONSTRUCT_PUBLISH",
+    "RECONSTRUCT_SUPERSEDE": "RECONSTRUCT_SUPERSEDE",
 }
 
 
@@ -56,13 +83,19 @@ def visible_targets(obs: Observation) -> set[str]:
     return found
 
 
-def advertised(obs: Observation, action: str) -> bool:
-    name = action.upper()
-    if name in obs.available_actions:
+def advertised(obs: Observation, action: str, operation: str | None = None) -> bool:
+    names = {action.upper()}
+    if operation:
+        names.add(operation.upper())
+    if "BUILD" in names:
+        names |= set(_BUILD)
+    if names & {a.upper() for a in obs.available_actions}:
         return True
-    if any(a.action == name for a in obs.affordances):
-        return True
-    if name in {"ENTER_WORLD", "OBSERVE", "LOOK", "WAIT"}:
+    for aff in obs.affordances:
+        aff_op = str((aff.raw or {}).get("operation") or aff.action or "").upper()
+        if aff.action in names or aff_op in names:
+            return True
+    if names & {"ENTER_WORLD", "OBSERVE", "LOOK", "WAIT"}:
         return True
     return False
 
@@ -71,11 +104,13 @@ def validate_proposal(proposal: ActionProposal, obs: Observation, policy: Client
     action = (proposal.action or "").upper()
     if not action:
         raise NoemaActionRejected("INVALID_PROPOSAL", "missing action", failure=FailureClass.INVALID_PROPOSAL)
-    if not policy.permits(action):
-        raise NoemaActionRejected("POLICY_DENIED", f"{action} gated by client policy", failure=FailureClass.INVALID_PROPOSAL)
-    if not advertised(obs, action):
-        raise NoemaActionRejected("INVALID_PROPOSAL", f"{action} is not advertised", failure=FailureClass.INVALID_PROPOSAL)
     args = dict(proposal.arguments or {})
+    args.pop("line", None)
+    operation = str(args.get("operation") or "").upper()
+    if not policy.permits(action) and not (operation and policy.permits(operation)):
+        raise NoemaActionRejected("POLICY_DENIED", f"{action} gated by client policy", failure=FailureClass.INVALID_PROPOSAL)
+    if not advertised(obs, action, operation or None):
+        raise NoemaActionRejected("INVALID_PROPOSAL", f"{action} is not advertised", failure=FailureClass.INVALID_PROPOSAL)
     target = proposal.target_id
     if action in _DIRECT:
         command, mutating = _DIRECT[action]
@@ -95,11 +130,23 @@ def validate_proposal(proposal: ActionProposal, obs: Observation, policy: Client
             if entity_id:
                 args = {**args, "entity_id": entity_id}
         return ValidatedAction(command=command, arguments=args, mutating=mutating)
-    if action in _COMMIT:
+    build_op = operation if operation in _BUILD else (action if action in _BUILD else None)
+    if action == "BUILD" or build_op:
         vis = visible_targets(obs)
         if target and vis and str(target) not in vis:
             raise NoemaActionRejected("INVALID_PROPOSAL", "target not visible", failure=FailureClass.INVALID_PROPOSAL)
-        mapped = {"operation": _COMMIT[action], **args}
+        mapped = {**args, "operation": build_op or "CONSTRUCT"}
+        if target and "entity_id" not in mapped and mapped["operation"] != "CONSTRUCT":
+            mapped["entity_id"] = target
+        return ValidatedAction(command="BUILD", arguments=mapped, mutating=True)
+    if action in _COMMIT or operation in _COMMIT:
+        vis = visible_targets(obs)
+        if target and vis and str(target) not in vis:
+            raise NoemaActionRejected("INVALID_PROPOSAL", "target not visible", failure=FailureClass.INVALID_PROPOSAL)
+        op = _COMMIT.get(operation) or _COMMIT.get(action)
+        if not op:
+            raise NoemaActionRejected("INVALID_PROPOSAL", f"unknown action {action}", failure=FailureClass.INVALID_PROPOSAL)
+        mapped = {**args, "operation": op}
         if target and "entity_id" not in mapped:
             mapped["entity_id"] = target
         return ValidatedAction(command="COMMIT", arguments=mapped, mutating=True)
