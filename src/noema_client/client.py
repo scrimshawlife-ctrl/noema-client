@@ -280,7 +280,7 @@ class NoemaClient:
             latency_ms=None,
             protocol=self.session.protocol,
             transport=self.session.transport,
-            client_version="0.1.7",
+            client_version="0.1.8",
         )
         return result
 
