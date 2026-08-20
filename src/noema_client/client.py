@@ -264,7 +264,7 @@ class NoemaClient:
             latency_ms=None,
             protocol=self.session.protocol,
             transport=self.session.transport,
-            client_version="0.1.3",
+            client_version="0.1.4",
         )
         return result
 
@@ -281,7 +281,7 @@ class NoemaClient:
             turn = runner.turn()
             turns.append(turn)
             self.observation = runner.observation
-            if turn.stopped or not turn.ok:
+            if turn.stopped:
                 break
         return turns
 
