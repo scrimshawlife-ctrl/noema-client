@@ -46,6 +46,20 @@ noema disconnect
 
 `noema act REPAIR entity.relay-trunk` is debug/manual. Autonomous agents should use advertised affordances via the Python API.
 
+## Aliases and macros
+
+Preference layer only. Stored in `~/.config/noema/aliases.json` (mode `0600`). Not world truth. Does not bypass auth, costs, affordances, or settlement.
+
+```bash
+noema alias set x inspect
+noema alias set dock move south
+noema alias list
+noema alias rm dock
+noema do "look; wait"
+```
+
+`do` runs at most 5 steps, sequentially, each as an ordinary `act`. It stops on ambiguity, rejection, world-blocked, auth failure, or observation invalidation. No hidden retries. Reserved command names (`look`, `move`, `wait`, …) cannot be alias keys.
+
 ## Use with an agent
 
 Install this package, then follow `skills/noema/SKILL.md`. Teach the agent to run `noema`, not to paste curl.
