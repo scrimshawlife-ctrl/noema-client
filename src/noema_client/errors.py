@@ -17,6 +17,7 @@ class FailureClass(str, Enum):
     ACTION_REJECTED = "ACTION_REJECTED"
     INVALID_PROPOSAL = "INVALID_PROPOSAL"
     SETTLEMENT_FAILURE = "SETTLEMENT_FAILURE"
+    SETTLEMENT_RESYNC = "SETTLEMENT_RESYNC"
     PROTOCOL = "PROTOCOL"
     SEAL = "SEAL"
 
@@ -78,6 +79,7 @@ def raise_for_failure(failure: FailureClass | None, code: str, message: str) -> 
         FailureClass.SEAL: NoemaSealError,
         FailureClass.WORLD_NOT_READY: NoemaError,
         FailureClass.SETTLEMENT_FAILURE: NoemaActionRejected,
+        FailureClass.SETTLEMENT_RESYNC: NoemaActionRejected,
     }
     cls = mapping.get(failure, NoemaError)
     raise cls(code, message, retryable=failure == FailureClass.RETRYABLE_TRANSPORT, failure=failure)

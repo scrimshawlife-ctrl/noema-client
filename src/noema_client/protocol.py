@@ -8,12 +8,13 @@ workers/noema/src/protocol-ws.ts commandFromFrame.
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
 from noema_client.errors import FailureClass, NoemaProtocolError
-from noema_client.transport import classify
+from noema_client.transport import classify, payload_is_resync
 from noema_client.types import CommandResult
 
 
@@ -184,12 +185,14 @@ class WebSocketGateway:
         key = idempotency_key or f"idem.{self._epoch}.{self._seq:06d}"
         req_id = request_id or _rid()
         self._seq += 1
+        action_seq = getattr(self, "_action_seq", 0)
+        self._action_seq = action_seq + 1
         typ = "OBSERVE" if verb == "OBSERVE" else "ACT"
         body: dict[str, Any] = {
             "command": verb,
             "arguments": arguments or {},
             "action": {"verb": verb, "parameters": arguments or {}},
-            "client": {"type": "agent", "runtime": self.runtime},
+            "client": {"type": "agent", "runtime": self.runtime, "client_action_sequence": action_seq},
         }
         frame = {
             "protocol": "agent-protocol/v1",
@@ -202,9 +205,14 @@ class WebSocketGateway:
         last_exc: Exception | None = None
         payload: dict[str, Any] = {}
         attempts = max(1, retries + 1)
+        resync_left = 1
         for attempt in range(attempts):
             try:
                 payload = self._rpc(frame)
+                if payload_is_resync(payload) and resync_left > 0:
+                    resync_left -= 1
+                    time.sleep(0.05)
+                    continue
                 if str(payload.get("type") or "") == "ERROR":
                     err = payload.get("error") if isinstance(payload.get("error"), dict) else {}
                     code = str(err.get("code") or "").upper()

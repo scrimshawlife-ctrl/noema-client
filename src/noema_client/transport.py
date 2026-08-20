@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import socket
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -81,6 +82,22 @@ def default_http(
         return payload
 
 
+def _error_code(payload: dict[str, Any]) -> str:
+    err = payload.get("error")
+    if isinstance(err, dict):
+        return str(err.get("code") or "").upper()
+    return ""
+
+
+def payload_is_resync(payload: dict[str, Any]) -> bool:
+    if _error_code(payload) == "SETTLEMENT_RESYNC":
+        return True
+    body = payload.get("body")
+    if isinstance(body, dict) and _error_code(body) == "SETTLEMENT_RESYNC":
+        return True
+    return False
+
+
 def classify(payload: dict[str, Any], http_status: int | None) -> FailureClass | None:
     if http_status in (401, 403):
         code = ""
@@ -102,6 +119,8 @@ def classify(payload: dict[str, Any], http_status: int | None) -> FailureClass |
         return FailureClass.WORLD_PAUSED
     if status == "INCIDENT" or code in {"WORLD_INCIDENT", "INCIDENT"}:
         return FailureClass.WORLD_INCIDENT
+    if code == "SETTLEMENT_RESYNC":
+        return FailureClass.SETTLEMENT_RESYNC
     if status in {"PREVIEW", "ARCHIVED"} or code in {"WORLD_NOT_READY", "NOT_ACTIVE"}:
         return FailureClass.WORLD_NOT_READY
     if payload.get("ok") is False or (http_status and http_status >= 400):
@@ -151,6 +170,7 @@ class HttpGateway:
         self.seal = seal
         self._admin_token = admin_token
         self.last_fallback_note: str | None = None
+        self._action_seq = 0
 
     def send_command(
         self,
@@ -163,16 +183,23 @@ class HttpGateway:
     ) -> CommandResult:
         key = idempotency_key or f"idem.{uuid.uuid4().hex[:12]}"
         req_id = request_id or f"req.{uuid.uuid4().hex[:10]}"
+        action_seq = self._action_seq
         last_timeout: Exception | None = None
         payload: dict[str, Any] = {}
-        for _ in range(retries + 1):
+        resync_left = 1
+        transport_left = retries + 1
+        while transport_left > 0:
             try:
                 body: dict[str, Any] = {
                     "request_id": req_id,
                     "idempotency_key": key,
                     "command": command,
                     "arguments": arguments or {},
-                    "client": {"type": "agent", "runtime": self.runtime},
+                    "client": {
+                        "type": "agent",
+                        "runtime": self.runtime,
+                        "client_action_sequence": action_seq,
+                    },
                 }
                 if self.world_id:
                     body["world_id"] = self.world_id
@@ -183,11 +210,17 @@ class HttpGateway:
                     extra["X-Noema-Admin-Token"] = self._admin_token
                 payload = call_http(self._http, "POST", self.command_url, body, self._tokens.reveal(), extra)
                 last_timeout = None
+                if payload_is_resync(payload) and resync_left > 0:
+                    resync_left -= 1
+                    time.sleep(0.05)
+                    continue
                 break
             except (TimeoutError, urllib.error.URLError, ConnectionError, OSError) as exc:
                 last_timeout = exc
+                transport_left -= 1
                 continue
-        if last_timeout is not None:
+        self._action_seq = action_seq + 1
+        if last_timeout is not None and not payload:
             return CommandResult(
                 ok=False,
                 observation=None,
