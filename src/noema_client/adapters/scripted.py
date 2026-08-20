@@ -24,6 +24,25 @@ class ScriptedAdapter:
         return self._steps.pop(0)
 
 
+def harvest_hold_full(canonical: dict[str, Any]) -> bool:
+    resources = canonical.get("resources") or {}
+    if resources.get("storage") == 0:
+        return True
+    harvests: list[dict[str, Any]] = []
+    for aff in canonical.get("affordances") or []:
+        if not isinstance(aff, dict):
+            continue
+        action = str(aff.get("operation") or aff.get("action") or "").upper()
+        if action in {"HARVEST", "COMMIT.HARVEST"}:
+            harvests.append(aff)
+    if not harvests:
+        return False
+    return all(
+        (not aff.get("available", True)) and "free storage" in str(aff.get("reason") or "").lower()
+        for aff in harvests
+    )
+
+
 def harvest_stock_empty(canonical: dict[str, Any]) -> bool:
     harvests: list[dict[str, Any]] = []
     for aff in canonical.get("affordances") or []:
@@ -63,10 +82,33 @@ def move_direction(aff: dict[str, Any]) -> str | None:
     return None
 
 
+def _first_work_or_move(canonical: dict[str, Any], policy: dict[str, Any]) -> ActionProposal | None:
+    for aff in canonical.get("affordances") or []:
+        if not isinstance(aff, dict) or not aff.get("available", True):
+            continue
+        action = str(aff.get("action") or aff.get("operation") or "").upper()
+        if action == "REPAIR" and policy.get("repair") is not False:
+            return ActionProposal(action="REPAIR", target_id=aff.get("target_id"))
+    for aff in canonical.get("affordances") or []:
+        if not isinstance(aff, dict) or not aff.get("available", True):
+            continue
+        action = str(aff.get("action") or aff.get("operation") or "").upper()
+        if action != "MOVE":
+            continue
+        direction = move_direction(aff)
+        if not direction:
+            continue
+        return ActionProposal(action="MOVE", target_id=aff.get("target_id"), arguments={"direction": direction})
+    return None
+
+
 class FirstValidAffordanceAdapter:
     def decide(self, context: dict[str, Any]) -> ActionProposal | None:
         canonical = context.get("canonical") or {}
         policy = (context.get("system") or {}).get("permits") or {}
+        if harvest_hold_full(canonical):
+            work = _first_work_or_move(canonical, policy)
+            return work or ActionProposal(action="WAIT")
         if harvest_stock_empty(canonical):
             for aff in canonical.get("affordances") or []:
                 if not aff.get("available", True):
