@@ -11,6 +11,13 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from noema_client.actions import validate_proposal
+from noema_client.aliases import (
+    expand_aliases,
+    expand_proposal,
+    macro_steps_from_line,
+    proposal_from_line,
+    should_stop_macro,
+)
 from noema_client.adapters.scripted import FirstValidAffordanceAdapter
 from noema_client.auth import DeviceEnrollment, StaticTokenProvider
 from noema_client.config import (
@@ -18,13 +25,21 @@ from noema_client.config import (
     StoredCredential,
     clear_credential,
     config_dir,
+    load_aliases,
     load_credential,
     load_server,
     save_credential,
     save_server,
 )
 from noema_client.discovery import Discovery, discover
-from noema_client.errors import FailureClass, NoemaAuthError, NoemaError, NoemaProtocolError, raise_for_failure
+from noema_client.errors import (
+    FailureClass,
+    NoemaActionRejected,
+    NoemaAuthError,
+    NoemaError,
+    NoemaProtocolError,
+    raise_for_failure,
+)
 from noema_client.isolated import (
     ISOLATED_COMMAND_PATH,
     admit_isolated_world_id,
@@ -246,6 +261,7 @@ class NoemaClient:
 
     def act(self, proposal: ActionProposal) -> CommandResult:
         obs = self.observation or to_observation({})
+        proposal = expand_proposal(proposal, load_aliases(self.config_home))
         validated = validate_proposal(proposal, obs, self.policy)
         result = self._require_gateway().send_command(validated.command, validated.arguments)
         if result.ok:
@@ -264,13 +280,59 @@ class NoemaClient:
             latency_ms=None,
             protocol=self.session.protocol,
             transport=self.session.transport,
-            client_version="0.1.6",
+            client_version="0.1.7",
         )
         return result
 
+    def run_macro(self, line: str) -> list[CommandResult]:
+        parsed = macro_steps_from_line(line)
+        if parsed.error:
+            return [self._local_reject("MACRO_INVALID", parsed.error)]
+        aliases = load_aliases(self.config_home)
+        results: list[CommandResult] = []
+        for step in parsed.steps:
+            expanded = expand_aliases(step, aliases)
+            if expanded.error:
+                results.append(self._local_reject("ALIAS_TOO_DEEP", expanded.error))
+                break
+            if ";" in expanded.line or expanded.line.lower().startswith("do "):
+                results.append(self._local_reject("MACRO_NESTED", "Macros cannot nest."))
+                break
+            proposal = proposal_from_line(expanded.line)
+            if proposal is None:
+                results.append(self._local_reject("INVALID_PROPOSAL", f"unknown step {expanded.line}"))
+                break
+            try:
+                result = self.act(proposal)
+            except NoemaActionRejected as exc:
+                results.append(self._local_reject(exc.code, exc.message, failure=exc.failure))
+                break
+            results.append(result)
+            if should_stop_macro(result.ok, result.failure, result.error):
+                break
+        return results
+
+    def _local_reject(self, code: str, message: str, *, failure: FailureClass | None = None) -> CommandResult:
+        classified = failure or FailureClass.INVALID_PROPOSAL
+        return CommandResult(
+            ok=False,
+            observation=None,
+            error={"code": code, "message": message},
+            settled=False,
+            http_status=None,
+            failure=classified,
+            idempotency_key="",
+            request_id="",
+        )
+
     def play(self, *, max_actions: int | None = None, adapter: Any | None = None, enter: bool = True) -> list:
         gw = self._require_gateway()
-        runner = Runner(gw, adapter or FirstValidAffordanceAdapter(), self.policy)
+        runner = Runner(
+            gw,
+            adapter or FirstValidAffordanceAdapter(),
+            self.policy,
+            aliases=load_aliases(self.config_home),
+        )
         turns = []
         if enter:
             turns.append(self.act(ActionProposal(action="ENTER_WORLD")))

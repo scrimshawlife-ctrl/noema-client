@@ -9,6 +9,7 @@ import time
 from typing import Any, Protocol
 
 from noema_client.actions import validate_proposal
+from noema_client.aliases import expand_proposal
 from noema_client.errors import FailureClass, NoemaActionRejected, NoemaError
 from noema_client.observations import prepare_context, to_observation
 from noema_client.policy import ClientPolicy
@@ -47,10 +48,17 @@ class CircuitBreaker:
 
 
 class Runner:
-    def __init__(self, gateway: CommandTransport, adapter: Adapter, policy: ClientPolicy | None = None) -> None:
+    def __init__(
+        self,
+        gateway: CommandTransport,
+        adapter: Adapter,
+        policy: ClientPolicy | None = None,
+        aliases: dict[str, str] | None = None,
+    ) -> None:
         self.gateway = gateway  # CommandTransport: HTTP or WebSocket
         self.adapter = adapter
         self.policy = policy or ClientPolicy()
+        self.aliases = dict(aliases or {})
         self.breaker = CircuitBreaker(self.policy.max_consecutive_failures)
         self.observation: Observation | None = None
         self.memory: list[dict[str, Any]] = []
@@ -92,6 +100,7 @@ class Runner:
         if proposal is None:
             return TurnResult(ok=False, stopped=True, reason="no_proposal")
         try:
+            proposal = expand_proposal(proposal, self.aliases)
             validated = validate_proposal(proposal, obs, self.policy)
         except NoemaActionRejected as exc:
             self.breaker.record_failure(exc.code)
