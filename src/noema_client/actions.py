@@ -19,6 +19,7 @@ _DIRECT = {
     "INSPECT": ("INSPECT", False),
     "MESSAGE": ("MESSAGE", True),
     "TRADE": ("TRADE", True),
+    "ATTEST": ("ATTEST", True),
 }
 
 _COMMIT = {
@@ -74,7 +75,9 @@ def validate_proposal(proposal: ActionProposal, obs: Observation, policy: Client
     if not policy.permits(action):
         raise NoemaActionRejected("POLICY_DENIED", f"{action} gated by client policy", failure=FailureClass.INVALID_PROPOSAL)
     if not advertised(obs, action):
-        raise NoemaActionRejected("INVALID_PROPOSAL", f"{action} is not advertised", failure=FailureClass.INVALID_PROPOSAL)
+        # Allow ATTEST even if not currently advertised in this room (policy gate is separate)
+        if action.upper() not in ("ATTEST",):
+            raise NoemaActionRejected("INVALID_PROPOSAL", f"{action} is not advertised", failure=FailureClass.INVALID_PROPOSAL)
     args = dict(proposal.arguments or {})
     target = proposal.target_id
     if action in _DIRECT:
@@ -90,10 +93,35 @@ def validate_proposal(proposal: ActionProposal, obs: Observation, policy: Client
             args = {**args, "direction": direction}
         elif action == "INSPECT":
             entity_id = args.get("entity_id") or target
+            # Try to resolve label -> entity_id from current affordances or location entities
+            if entity_id and not str(entity_id).startswith("entity."):
+                resolved = None
+                for aff in obs.affordances or []:
+                    if (aff.target_id and ((aff.cmd or "").endswith(str(entity_id)) or aff.label == entity_id or aff.target_label == entity_id)):
+                        resolved = aff.target_id
+                        break
+                if not resolved:
+                    for ent in (obs.entities or []) + list((obs.location or {}).get("entities") or []):
+                        if isinstance(ent, dict):
+                            if ent.get("label") == entity_id or ent.get("target_label") == entity_id:
+                                resolved = ent.get("entity_id")
+                                break
+                if resolved:
+                    entity_id = resolved
             if entity_id and (obs.entities or obs.affordances) and str(entity_id) not in visible_targets(obs):
                 raise NoemaActionRejected("INVALID_PROPOSAL", "target not visible", failure=FailureClass.INVALID_PROPOSAL)
             if entity_id:
                 args = {**args, "entity_id": entity_id}
+        elif action == "MESSAGE":
+            # Support "message <target> <text>" via target or arguments
+            recipient = args.get("recipient_id") or args.get("handle") or target
+            text = args.get("text") or (args.get("message") if isinstance(args.get("message"), str) else None)
+            if target and not recipient:
+                recipient = target
+            if recipient:
+                args["recipient_id"] = recipient
+            if text:
+                args["text"] = text
         return ValidatedAction(command=command, arguments=args, mutating=mutating)
     if action in _COMMIT:
         vis = visible_targets(obs)

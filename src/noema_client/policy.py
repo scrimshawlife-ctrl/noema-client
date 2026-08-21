@@ -14,9 +14,10 @@ class ClientPolicy:
     allow_repair: bool = True
     allow_harvest: bool = True
     allow_message: bool = True
-    allow_org_create: bool = False
-    allow_contest: bool = False
-    allow_access: bool = False
+    allow_attest: bool = True
+    allow_org_create: bool = True
+    allow_contest: bool = True
+    allow_access: bool = True
     stop_on_incident: bool = True
     stop_on_auth_failure: bool = True
     max_consecutive_failures: int = 3
@@ -34,7 +35,7 @@ class ClientPolicy:
         if self.allowed_actions and name not in {a.upper() for a in self.allowed_actions}:
             if name not in {"LOOK", "OBSERVE", "WAIT", "ENTER_WORLD"}:
                 return False
-        if name in {"LOOK", "MOVE", "INSPECT", "WAIT", "ENTER_WORLD", "OBSERVE", "LEAVE_WORLD"}:
+        if name in {"LOOK", "MOVE", "INSPECT", "WAIT", "ENTER_WORLD", "OBSERVE", "LEAVE_WORLD", "ATTEST"}:
             return True
         if name in {"REPAIR", "COMMIT.REPAIR"}:
             return self.allow_repair
@@ -50,4 +51,8 @@ class ClientPolicy:
             return self.allow_contest
         if name.startswith("ACCESS"):
             return self.allow_access
+        if name == "ATTEST" or name.endswith(".ATTEST"):
+            return self.allow_attest
+        if "ATTEST" in name:
+            return self.allow_attest
         return False

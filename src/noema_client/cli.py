@@ -94,7 +94,16 @@ def cmd_act(ns: argparse.Namespace) -> int:
     client = _client(ns)
     if not client._credential:
         client.connect()
-    client.observe()
+
+    action_upper = (ns.action or "").upper()
+    # ENTER_WORLD must be allowed before any observe (fresh session)
+    if action_upper != "ENTER_WORLD":
+        try:
+            client.observe()
+        except Exception:
+            # If we can't observe yet, let the act decide (e.g. first ENTER)
+            pass
+
     args: dict = {}
     if ns.arguments:
         args = json.loads(ns.arguments)
