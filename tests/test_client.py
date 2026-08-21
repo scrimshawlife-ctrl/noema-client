@@ -212,6 +212,73 @@ def test_idempotent_retry(tmp_path: Path):
         httpd.shutdown()
 
 
+def test_settlement_resync_retries_once_same_keys(tmp_path: Path):
+    fake = FakeNoema()
+    fake.resync_remaining = 1
+    origin, httpd, _ = serve_fake(fake)
+    try:
+        save_credential(StoredCredential(access_token="tok.fixture-secret", server=origin), tmp_path)
+        client = NoemaClient(server=origin, config_home=tmp_path, transport="http")
+        client._credential = load_credential(tmp_path)
+        client.discover()
+        client._bind_gateway(client._credential)
+        result = client._gateway.send_command("LOOK", {}, idempotency_key="idem.resync", request_id="req.resync")
+        assert result.ok is True
+        looks = [c for c in fake.commands if c.get("command") == "LOOK"]
+        assert len(looks) == 2
+        assert looks[0]["idempotency_key"] == looks[1]["idempotency_key"] == "idem.resync"
+        seq0 = (looks[0].get("client") or {}).get("client_action_sequence")
+        seq1 = (looks[1].get("client") or {}).get("client_action_sequence")
+        assert seq0 == seq1
+        assert seq0 is not None
+        assert result.failure is None
+        assert result.world_status != "INCIDENT"
+    finally:
+        httpd.shutdown()
+
+
+def test_settlement_resync_does_not_loop(tmp_path: Path):
+    fake = FakeNoema()
+    fake.resync_remaining = 5
+    origin, httpd, _ = serve_fake(fake)
+    try:
+        save_credential(StoredCredential(access_token="tok.fixture-secret", server=origin), tmp_path)
+        client = NoemaClient(server=origin, config_home=tmp_path, transport="http")
+        client._credential = load_credential(tmp_path)
+        client.discover()
+        client._bind_gateway(client._credential)
+        result = client._gateway.send_command("LOOK", {}, idempotency_key="idem.loop")
+        assert result.ok is False
+        assert (result.error or {}).get("code") == "SETTLEMENT_RESYNC"
+        from noema_client.errors import FailureClass
+
+        assert result.failure == FailureClass.SETTLEMENT_RESYNC
+        assert result.failure != FailureClass.WORLD_INCIDENT
+        looks = [c for c in fake.commands if c.get("idempotency_key") == "idem.loop"]
+        assert len(looks) == 2
+    finally:
+        httpd.shutdown()
+
+
+def test_forbidden_is_not_auto_retried(tmp_path: Path):
+    fake = FakeNoema()
+    origin, httpd, _ = serve_fake(fake)
+    try:
+        save_credential(StoredCredential(access_token="tok.fixture-secret", server=origin), tmp_path)
+        client = NoemaClient(server=origin, config_home=tmp_path, transport="http")
+        client._credential = load_credential(tmp_path)
+        client.discover()
+        client._bind_gateway(client._credential)
+        fake.world_status = "INCIDENT"
+        result = client._gateway.send_command("MOVE", {"direction": "east"}, idempotency_key="idem.inc")
+        assert result.ok is False
+        assert result.failure and result.failure.value == "WORLD_INCIDENT"
+        moves = [c for c in fake.commands if c.get("command") == "MOVE"]
+        assert len(moves) == 1
+    finally:
+        httpd.shutdown()
+
+
 def test_cli_status_no_token(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("NOEMA_CONFIG_DIR", str(tmp_path))
     save_credential(StoredCredential(access_token="tok.should-not-print", server="https://example.invalid"), tmp_path)
@@ -438,3 +505,68 @@ def test_isolated_refuses_websocket_transport(tmp_path: Path):
     with pytest.raises(NoemaError) as exc:
         client._bind_gateway(client._credential)
     assert exc.value.code == "WS_ISOLATED"
+
+
+def test_play_continues_after_settlement_race(tmp_path: Path):
+    from noema_client.adapters.scripted import ScriptedAdapter
+    from noema_client.errors import FailureClass
+    from noema_client.types import CommandResult
+
+    class Seq:
+        def __init__(self) -> None:
+            self.waits = 0
+
+        def send_command(self, command, arguments=None, **kwargs):
+            cmd = str(command).upper()
+            if cmd in {"OBSERVE", "LOOK", "ENTER_WORLD"}:
+                return CommandResult(
+                    ok=True,
+                    observation={"world_status": "ACTIVE", "available_actions": ["WAIT"]},
+                    error=None,
+                    settled=True,
+                    http_status=200,
+                    failure=None,
+                    idempotency_key="k",
+                    request_id="r",
+                    world_status="ACTIVE",
+                )
+            self.waits += 1
+            if self.waits == 1:
+                return CommandResult(
+                    ok=False,
+                    observation=None,
+                    error={"code": "STALE_HEAD", "message": "That action lost the settlement race. Observe and try again."},
+                    settled=False,
+                    http_status=409,
+                    failure=FailureClass.ACTION_REJECTED,
+                    idempotency_key="k",
+                    request_id="r",
+                    world_status="ACTIVE",
+                )
+            return CommandResult(
+                ok=True,
+                observation={"world_status": "ACTIVE", "available_actions": ["WAIT"], "consequence": "waited"},
+                error=None,
+                settled=True,
+                http_status=200,
+                failure=None,
+                idempotency_key="k",
+                request_id="r",
+                world_status="ACTIVE",
+            )
+
+        def close(self) -> None:
+            return None
+
+    client = NoemaClient(server="https://example.invalid", config_home=tmp_path, transport="http")
+    client._gateway = Seq()
+    turns = client.play(
+        max_actions=3,
+        adapter=ScriptedAdapter([ActionProposal(action="WAIT"), ActionProposal(action="WAIT"), ActionProposal(action="WAIT")]),
+        enter=False,
+    )
+    assert len(turns) == 3
+    assert turns[0].ok is False
+    assert turns[0].stopped is False
+    assert turns[1].ok is True
+    assert turns[2].ok is True

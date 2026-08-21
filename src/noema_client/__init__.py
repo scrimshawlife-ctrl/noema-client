@@ -14,9 +14,10 @@ from noema_client.errors import (
     NoemaWorldIncident,
     NoemaWorldPaused,
 )
+from noema_client.affordances import proposal_from_affordance
 from noema_client.types import ActionProposal, Affordance, Observation
 
-__version__ = "0.1.2"
+__version__ = "0.1.9"
 __all__ = [
     "ActionProposal",
     "Affordance",
@@ -30,5 +31,6 @@ __all__ = [
     "NoemaWorldIncident",
     "NoemaWorldPaused",
     "Observation",
+    "proposal_from_affordance",
     "__version__",
 ]

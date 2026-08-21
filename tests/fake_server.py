@@ -26,6 +26,9 @@ class FakeNoema:
         self.seal_required = True
         self.accepted_seals = ["sha256:9b9c211c156a9b49e700fa39e409733099a38df9d95c7f6fb90ca3e9e740a395"]
         self.require_seal_on_command = True
+        self.resync_remaining = 0
+        self.fail_command: str | None = None
+        self.fail_error: dict[str, Any] = {"code": "ACTION_REJECTED", "message": "rejected"}
 
     def observation(self) -> dict[str, Any]:
         return {
@@ -117,6 +120,23 @@ class FakeNoema:
             rec["_had_seal"] = bool(headers.get("X-Noema-Seal") or headers.get("x-noema-seal"))
             rec["_had_admin"] = bool(headers.get("X-Noema-Admin-Token") or headers.get("x-noema-admin-token"))
             self.commands.append(rec)
+            if self.fail_command and command == str(self.fail_command).upper():
+                return 409, {
+                    "ok": False,
+                    "error": dict(self.fail_error),
+                    "world_status": self.world_status,
+                }
+            if self.resync_remaining > 0:
+                self.resync_remaining -= 1
+                return 200, {
+                    "ok": False,
+                    "retryable": True,
+                    "world_status": "ACTIVE",
+                    "error": {
+                        "code": "SETTLEMENT_RESYNC",
+                        "message": "world head resynced after sequence drift; retry the command",
+                    },
+                }
             if self.world_status == "PAUSED" and command not in {"LOOK", "OBSERVE", "WAIT"}:
                 return 409, {"ok": False, "error": {"code": "WORLD_PAUSED"}, "world_status": "PAUSED"}
             if self.world_status == "INCIDENT" and command not in {"LOOK", "OBSERVE"}:

@@ -45,6 +45,23 @@ class ClientPolicy:
             return self.allow_trade
         if name == "MESSAGE":
             return self.allow_message
+        if name in {
+            "BUILD",
+            "CONSTRUCT",
+            "DISMANTLE",
+            "UPGRADE",
+            "REPURPOSE",
+            "RESTORE",
+            "VEST",
+            "SHARE",
+            "CONNECT",
+            "FOCUS",
+            "ATTEST",
+            "RECONSTRUCT",
+            "RECONSTRUCT_PUBLISH",
+            "RECONSTRUCT_SUPERSEDE",
+        }:
+            return True
         if name.startswith("ORG"):
             return self.allow_org_create
         if name.startswith("CONTEST") or name.startswith("AGREEMENT"):

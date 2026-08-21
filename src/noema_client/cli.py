@@ -1,4 +1,4 @@
-"""Official CLI: noema connect | status | observe | play | act | disconnect | doctor."""
+"""Official CLI: noema connect | status | observe | play | act | alias | do | disconnect | doctor."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ import json
 import sys
 from pathlib import Path
 
+from noema_client.aliases import apply_alias_command, parse_alias_command
 from noema_client.client import NoemaClient
-from noema_client.config import DEFAULT_SERVER
+from noema_client.config import load_aliases, save_aliases
 from noema_client.errors import NoemaError
 from noema_client.observations import render_observation
 from noema_client.seal import refused_play_flag
@@ -153,6 +154,56 @@ def cmd_disconnect(ns: argparse.Namespace) -> int:
     return 0
 
 
+def _config_home(ns: argparse.Namespace) -> Path | None:
+    return Path(ns.config_dir) if getattr(ns, "config_dir", None) else None
+
+
+def cmd_alias(ns: argparse.Namespace) -> int:
+    directory = _config_home(ns)
+    aliases = load_aliases(directory)
+    if ns.alias_op == "list":
+        line = "alias list"
+    elif ns.alias_op == "rm":
+        line = f"alias rm {ns.name}"
+    else:
+        line = f"alias set {ns.name} {' '.join(ns.expansion)}"
+    parsed = parse_alias_command(line)
+    applied = apply_alias_command(aliases, parsed)
+    if parsed is None or not parsed.ok:
+        print(applied.text, file=sys.stderr)
+        return 1
+    if parsed.op == "set" and parsed.name not in applied.aliases:
+        print(applied.text, file=sys.stderr)
+        return 1
+    if parsed.op in {"set", "rm"}:
+        save_aliases(applied.aliases, directory)
+    print(applied.text)
+    return 0
+
+
+def cmd_do(ns: argparse.Namespace) -> int:
+    client = _client(ns)
+    if not client._credential:
+        client.connect()
+    client.observe()
+    line = " ".join(ns.steps)
+    if not line.lower().startswith("do "):
+        line = f"do {line}"
+    results = client.run_macro(line)
+    ok = True
+    for result in results:
+        if result.ok:
+            if result.observation:
+                from noema_client.observations import to_observation
+
+                print(render_observation(to_observation(result.observation)))
+        else:
+            ok = False
+            err = result.error or {}
+            print(f"{err.get('code') or 'REJECTED'}: {err.get('message') or ''}", file=sys.stderr)
+    return 0 if ok and results else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="noema", description="Official NOEMA Controller client")
     parser.add_argument("--server", default=None, help="NOEMA origin (default https://noema.guru or NOEMA_SERVER)")
@@ -201,6 +252,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_disc = sub.add_parser("disconnect", help="stop local session")
     p_disc.add_argument("--forget", action="store_true", help="remove local credential; does not delete Player")
     p_disc.set_defaults(func=cmd_disconnect)
+
+    p_alias = sub.add_parser("alias", help="player-preference aliases; not world truth")
+    alias_sub = p_alias.add_subparsers(dest="alias_op", required=True)
+    p_alias_list = alias_sub.add_parser("list", help="list local aliases")
+    p_alias_list.set_defaults(func=cmd_alias)
+    p_alias_set = alias_sub.add_parser("set", help="set a local alias")
+    p_alias_set.add_argument("name")
+    p_alias_set.add_argument("expansion", nargs="+")
+    p_alias_set.set_defaults(func=cmd_alias)
+    p_alias_rm = alias_sub.add_parser("rm", help="remove a local alias")
+    p_alias_rm.add_argument("name")
+    p_alias_rm.set_defaults(func=cmd_alias)
+
+    p_do = sub.add_parser("do", help="bounded sequential macro; each step is an ordinary action")
+    p_do.add_argument("steps", nargs="+", help='example: look; wait   (quote if using ";")')
+    p_do.set_defaults(func=cmd_do)
     return parser
 
 

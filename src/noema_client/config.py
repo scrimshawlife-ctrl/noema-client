@@ -56,6 +56,34 @@ def config_path(directory: Path | None = None) -> Path:
     return (directory or config_dir()) / "config.toml"
 
 
+def aliases_path(directory: Path | None = None) -> Path:
+    return (directory or config_dir()) / "aliases.json"
+
+
+def load_aliases(directory: Path | None = None) -> dict[str, str]:
+    path = aliases_path(directory)
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, value in data.items():
+        if isinstance(key, str) and isinstance(value, str) and key.strip():
+            out[key.strip().lower()] = value.strip()
+    return out
+
+
+def save_aliases(aliases: dict[str, str], directory: Path | None = None) -> Path:
+    path = aliases_path(directory)
+    payload = {str(key).lower(): str(value) for key, value in aliases.items()}
+    _private_write(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return path
+
+
 def load_credential(directory: Path | None = None) -> StoredCredential | None:
     env_token = os.environ.get("NOEMA_TOKEN")
     server = os.environ.get("NOEMA_SERVER") or DEFAULT_SERVER
