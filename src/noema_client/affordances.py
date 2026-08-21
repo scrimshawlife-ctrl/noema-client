@@ -14,6 +14,7 @@ ARGUMENT_KEYS = (
     "clear",
     "class",
     "subject_id",
+    "subject_entity_id",
     "archive_claim",
     "org_id",
     "player_id",
@@ -59,6 +60,8 @@ def arguments_from_affordance(row: dict[str, Any]) -> dict[str, Any]:
         out[key] = value
     if "agreement_reason" in out and "reason" not in out:
         out["reason"] = out["agreement_reason"]
+    if "subject_id" in out and "subject_entity_id" not in out:
+        out["subject_entity_id"] = out["subject_id"]
     out.pop("line", None)
     return out
 

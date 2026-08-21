@@ -42,6 +42,23 @@ def test_validate_build_construct_from_look_fields():
     assert "line" not in validated.arguments
 
 
+def test_attest_copies_subject_id_as_subject_entity_id():
+    row = {
+        "action": "ATTEST",
+        "operation": "ATTEST",
+        "target_id": "entity.archive-ledger",
+        "subject_id": "entity.relay-7",
+        "archive_claim": "OPERATING",
+        "available": True,
+    }
+    validated = validate_proposal(proposal_from_affordance(row), _obs(row), ClientPolicy())
+    assert validated.command == "COMMIT"
+    assert validated.arguments["operation"] == "ATTEST"
+    assert validated.arguments["subject_id"] == "entity.relay-7"
+    assert validated.arguments["subject_entity_id"] == "entity.relay-7"
+    assert validated.arguments["archive_claim"] == "OPERATING"
+
+
 def test_validate_repair_overhaul_extent():
     row = {
         "action": "REPAIR",
