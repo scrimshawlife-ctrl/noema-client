@@ -34,6 +34,7 @@ class Affordance:
     available: bool = True
     label: str | None = None
     cmd: str | None = None
+    hint: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -57,6 +58,17 @@ class Observation:
     world_status: str | None = None
     world_text: list[str] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
+    signaling_quality: float | None = None
+    drift_alerts: list[Any] = field(default_factory=list)
+    cascading_risk: float | None = None
+    protocol_strength: float | None = None
+    compositionality: float | None = None
+    reputation_summary: dict[str, Any] | None = None
+    active_norms: dict[str, Any] | None = None
+    scars: list[Any] = field(default_factory=list)
+    historical_context: dict[str, Any] | None = None
+    path_dependence_index: float | None = None
+    lore_attractors: list[Any] = field(default_factory=list)
 
     def __str__(self) -> str:
         loc = (self.location or {}).get("name") or "?"

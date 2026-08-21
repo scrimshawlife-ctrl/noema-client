@@ -95,6 +95,7 @@ def parse_affordances(rows: list[Any]) -> list[Affordance]:
                 available=bool(row.get("available", True)),
                 label=row.get("label"),
                 cmd=row.get("cmd"),
+                hint=row.get("hint") if isinstance(row.get("hint"), str) else None,
                 raw=row,
             )
         )

@@ -12,6 +12,10 @@ from noema_client.policy import ClientPolicy
 from noema_client.types import Observation
 
 
+def _num(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) else None
+
+
 def to_observation(
     payload: dict[str, Any] | None,
     *,
@@ -49,6 +53,17 @@ def to_observation(
         world_status=world_status or obs.get("world_status"),
         world_text=world_text,
         raw=obs,
+        signaling_quality=_num(obs.get("signaling_quality")),
+        drift_alerts=list(obs.get("drift_alerts") or []),
+        cascading_risk=_num(obs.get("cascading_risk")),
+        protocol_strength=_num(obs.get("protocol_strength")),
+        compositionality=_num(obs.get("compositionality")),
+        reputation_summary=obs.get("reputation_summary") if isinstance(obs.get("reputation_summary"), dict) else None,
+        active_norms=obs.get("active_norms") if isinstance(obs.get("active_norms"), dict) else None,
+        scars=list(obs.get("scars") or []),
+        historical_context=obs.get("historical_context") if isinstance(obs.get("historical_context"), dict) else None,
+        path_dependence_index=_num(obs.get("path_dependence_index")),
+        lore_attractors=list(obs.get("lore_attractors") or []),
     )
 
 
@@ -81,6 +96,17 @@ def prepare_context(obs: Observation, memory: list[dict[str, Any]], policy: Clie
             "affordances": [a.raw for a in obs.affordances],
             "last_consequence": obs.last_consequence,
             "world_status": obs.world_status,
+            "signaling_quality": obs.signaling_quality,
+            "drift_alerts": obs.drift_alerts,
+            "cascading_risk": obs.cascading_risk,
+            "protocol_strength": obs.protocol_strength,
+            "compositionality": obs.compositionality,
+            "reputation_summary": obs.reputation_summary,
+            "active_norms": obs.active_norms,
+            "scars": obs.scars,
+            "historical_context": obs.historical_context,
+            "path_dependence_index": obs.path_dependence_index,
+            "lore_attractors": obs.lore_attractors,
         },
         "world_text": list(obs.world_text),
         "memory": list(memory),
@@ -99,4 +125,13 @@ def render_observation(obs: Observation) -> str:
     acts = obs.available_actions or [a.action for a in obs.affordances if a.available]
     if acts:
         lines.append("Can do: " + ", ".join(acts[:12]))
+    if obs.scars:
+        lines.append(f"Scars: {len(obs.scars)}")
+    if obs.lore_attractors:
+        lines.append(f"Lore: {len(obs.lore_attractors)}")
+    if obs.protocol_strength is not None:
+        lines.append(f"Protocol: {obs.protocol_strength}")
+    hinted = [a.hint for a in obs.affordances if a.hint]
+    if hinted:
+        lines.append("Hints: " + "; ".join(hinted[:4]))
     return "\n".join(lines)
