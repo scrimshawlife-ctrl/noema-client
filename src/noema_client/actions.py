@@ -97,9 +97,13 @@ def validate_proposal(proposal: ActionProposal, obs: Observation, policy: Client
             if entity_id and not str(entity_id).startswith("entity."):
                 resolved = None
                 for aff in obs.affordances or []:
-                    if (aff.target_id and ((aff.cmd or "").endswith(str(entity_id)) or aff.label == entity_id or aff.target_label == entity_id)):
-                        resolved = aff.target_id
-                        break
+                    if aff.target_id:
+                        cmd = getattr(aff, "cmd", "") or ""
+                        alabel = getattr(aff, "label", "") or ""
+                        tlabel = getattr(aff, "target_label", "") or ""
+                        if cmd.endswith(str(entity_id)) or alabel == entity_id or tlabel == entity_id:
+                            resolved = aff.target_id
+                            break
                 if not resolved:
                     for ent in (obs.entities or []) + list((obs.location or {}).get("entities") or []):
                         if isinstance(ent, dict):
