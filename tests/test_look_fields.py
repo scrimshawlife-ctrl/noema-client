@@ -119,6 +119,45 @@ def test_validate_contest_agreement_access_reconstruct():
     assert r.arguments["visibility"] == "PRIVATE"
 
 
+def test_inspect_resolves_plain_label_to_entity_id():
+    obs = Observation(
+        available_actions=["INSPECT"],
+        affordances=parse_affordances(
+            [
+                {
+                    "action": "INSPECT",
+                    "target_id": "entity.old-market-post",
+                    "target_label": "market-post",
+                    "label": "Inspect market-post",
+                    "cmd": "inspect market-post",
+                    "available": True,
+                }
+            ]
+        ),
+        entities=[{"entity_id": "entity.old-market-post", "label": "market-post"}],
+        location={"entities": [{"entity_id": "entity.old-market-post", "label": "market-post"}]},
+    )
+    validated = validate_proposal(
+        ActionProposal(action="INSPECT", target_id="market-post"),
+        obs,
+        ClientPolicy(),
+    )
+    assert validated.command == "INSPECT"
+    assert validated.arguments["entity_id"] == "entity.old-market-post"
+
+
+def test_message_resolves_handle_to_player_recipient():
+    obs = Observation(available_actions=["MESSAGE"])
+    validated = validate_proposal(
+        ActionProposal(action="MESSAGE", target_id="hermes", arguments={"text": "ping"}),
+        obs,
+        ClientPolicy(),
+    )
+    assert validated.command == "MESSAGE"
+    assert validated.arguments["recipient_id"] == "player.hermes"
+    assert validated.arguments["text"] == "ping"
+
+
 def test_strips_line_even_if_model_sends_it():
     obs = _obs({"action": "BUILD", "operation": "CONSTRUCT", "class": "workshop", "available": True})
     validated = validate_proposal(

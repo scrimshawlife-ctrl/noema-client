@@ -95,7 +95,12 @@ def cmd_act(ns: argparse.Namespace) -> int:
     client = _client(ns)
     if not client._credential:
         client.connect()
-    client.observe()
+    action_upper = (ns.action or "").upper()
+    if action_upper != "ENTER_WORLD":
+        try:
+            client.observe()
+        except Exception:
+            pass
     args: dict = {}
     if ns.arguments:
         args = json.loads(ns.arguments)
