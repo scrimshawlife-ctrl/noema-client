@@ -215,8 +215,10 @@ def proposal_from_line(line: str) -> ActionProposal | None:
     target = rest[0] if rest else None
     arguments: dict[str, Any] = {}
     if action == "MESSAGE" and rest:
-        arguments["text"] = " ".join(rest)
-        return ActionProposal(action=action, arguments=arguments)
+        arguments["recipient_id"] = rest[0]
+        if len(rest) > 1:
+            arguments["text"] = " ".join(rest[1:])
+        return ActionProposal(action=action, target_id=rest[0], arguments=arguments)
     if arg_key and target:
         arguments[arg_key] = target
     target_id = target if arg_key == "entity_id" else None
