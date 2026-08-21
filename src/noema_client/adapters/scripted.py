@@ -103,32 +103,56 @@ def _first_work_or_move(canonical: dict[str, Any], policy: dict[str, Any]) -> Ac
     return None
 
 
+_SKIP_DEFAULT = frozenset(
+    {
+        "WAIT",
+        "LOOK",
+        "ORG_CREATE",
+        "ORG_MEMBER_ADD",
+        "CONTEST_DECLARE",
+        "AGREEMENT_FORM",
+        "TRADE",
+        "TRADE_ACCEPT",
+        "TRADE_REJECT",
+    }
+)
+_RANK = {
+    "INSPECT": 0,
+    "HARVEST": 1,
+    "COMMIT.HARVEST": 1,
+    "MOVE": 2,
+    "ATTEST": 3,
+    "REPAIR": 4,
+    "COMMIT.REPAIR": 4,
+}
+
+
 class FirstValidAffordanceAdapter:
+    """Default play: skip WAIT-first / quiet-room stall. Prefer INSPECT/HARVEST/MOVE."""
+
+    def __init__(self) -> None:
+        self._move_i = 0
+
     def decide(self, context: dict[str, Any]) -> ActionProposal | None:
         canonical = context.get("canonical") or {}
         policy = (context.get("system") or {}).get("permits") or {}
+        budgets = canonical.get("resources") or canonical.get("budgets") or {}
+        attn = budgets.get("attention")
         if harvest_hold_full(canonical):
             work = _first_work_or_move(canonical, policy)
             return work or ActionProposal(action="WAIT")
-        if harvest_stock_empty(canonical):
-            for aff in canonical.get("affordances") or []:
-                if not aff.get("available", True):
-                    continue
-                action = str(aff.get("action") or aff.get("operation") or "").upper()
-                if action == "REPAIR" and policy.get("repair") is not False:
-                    return ActionProposal(action="REPAIR", target_id=aff.get("target_id"))
-            return ActionProposal(action="WAIT")
-        if _quiet_room(canonical):
-            return ActionProposal(action="WAIT")
+
+        candidates: list[tuple[int, ActionProposal]] = []
+        moves: list[ActionProposal] = []
         for aff in canonical.get("affordances") or []:
-            if not aff.get("available", True):
+            if not isinstance(aff, dict) or not aff.get("available", True):
                 continue
             action = str(aff.get("action") or aff.get("operation") or "").upper()
-            if not action:
+            if not action or action in _SKIP_DEFAULT:
                 continue
             if action == "REPAIR" and policy.get("repair") is False:
                 continue
-            if action == "HARVEST" and policy.get("harvest") is False:
+            if action in {"HARVEST", "COMMIT.HARVEST"} and policy.get("harvest") is False:
                 continue
             proposal = proposal_from_affordance(aff)
             if proposal is None:
@@ -138,10 +162,22 @@ class FirstValidAffordanceAdapter:
                 if not direction:
                     continue
                 proposal.arguments["direction"] = direction
-            return proposal
-        available = list(canonical.get("available_actions") or [])
-        if "WAIT" in available or _quiet_room(canonical):
+                moves.append(proposal)
+                continue
+            rank = _RANK.get(action, 8)
+            candidates.append((rank, proposal))
+        if moves:
+            pick = moves[self._move_i % len(moves)]
+            self._move_i += 1
+            candidates.append((2, pick))
+        candidates.sort(key=lambda row: row[0])
+        if candidates and not (isinstance(attn, (int, float)) and attn <= 0):
+            return candidates[0][1]
+        if isinstance(attn, (int, float)) and attn <= 0:
             return ActionProposal(action="WAIT")
-        if "LOOK" in available or not available:
+        if harvest_stock_empty(canonical) and not candidates:
+            return ActionProposal(action="WAIT")
+        available = list(canonical.get("available_actions") or [])
+        if "LOOK" in available:
             return ActionProposal(action="LOOK")
-        return ActionProposal(action=str(available[0]))
+        return ActionProposal(action="WAIT")

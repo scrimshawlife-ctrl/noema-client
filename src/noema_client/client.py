@@ -249,11 +249,46 @@ class NoemaClient:
         assert self._gateway is not None
         return self._gateway
 
+    def _not_in_world(self, result: CommandResult | None = None, exc: BaseException | None = None) -> bool:
+        if result is not None and not result.ok:
+            code = str((result.error or {}).get("code") or "")
+            if code.upper() == "NOT_IN_WORLD":
+                return True
+        if exc is not None and getattr(exc, "code", "") == "NOT_IN_WORLD":
+            return True
+        return False
+
+    def ensure_in_world(self) -> Observation:
+        """ENTER_WORLD is idempotent. Fixes post-ENTER HTTP session expiry (issue #17)."""
+        entered = self.act(ActionProposal(action="ENTER_WORLD"))
+        if not entered.ok:
+            err = entered.error or {}
+            raise_for_failure(
+                entered.failure,
+                str(err.get("code") or "ENTER_FAILED"),
+                str(err.get("message") or "enter failed"),
+            )
+        result = self._require_gateway().send_command("OBSERVE", {})
+        if not result.ok:
+            err = result.error or {}
+            raise_for_failure(
+                result.failure,
+                str(err.get("code") or "OBSERVE_FAILED"),
+                str(err.get("message") or "observe failed"),
+            )
+        self.observation = to_observation(result.observation, world_status=result.world_status)
+        self.session.cycle = self.observation.cycle
+        self.session.world = self.observation.world
+        return self.observation
+
     def observe(self) -> Observation:
         result = self._require_gateway().send_command("OBSERVE", {})
         if not result.ok:
             err = result.error or {}
-            raise_for_failure(result.failure, str(err.get("code") or "OBSERVE_FAILED"), str(err.get("message") or "observe failed"))
+            code = str(err.get("code") or "OBSERVE_FAILED")
+            if code.upper() == "NOT_IN_WORLD":
+                return self.ensure_in_world()
+            raise_for_failure(result.failure, code, str(err.get("message") or "observe failed"))
         self.observation = to_observation(result.observation, world_status=result.world_status)
         self.session.cycle = self.observation.cycle
         self.session.world = self.observation.world
@@ -349,6 +384,7 @@ class NoemaClient:
 
     def status(self) -> dict[str, Any]:
         cred = self._credential
+        blocked = self.policy.blocked_advertised(self.observation) if self.observation else []
         return {
             "server": self.server,
             "connected": self.session.connected or bool(cred),
@@ -365,6 +401,8 @@ class NoemaClient:
             "admin_header": "present" if self._admin_token else "missing",
             "resume": self.session.resume,
             "cycle": self.session.cycle,
+            "policy_blocked_actions": blocked,
+            "attention_note": "WAIT restores attention; cap ~8. Mix MOVE/INSPECT so play does not stall.",
         }
 
     def doctor(self) -> dict[str, Any]:
@@ -387,6 +425,11 @@ class NoemaClient:
             report["world_id"] = self.world_id
         except Exception as exc:
             report["discovery"] = f"fail:{type(exc).__name__}"
+        if self.observation:
+            report["policy_blocked_actions"] = self.policy.blocked_advertised(self.observation)
+        else:
+            report["policy_blocked_actions"] = []
+        report["attention_note"] = "WAIT restores attention; cap ~8. Default play skips WAIT when MOVE/INSPECT exist."
         return report
 
     def disconnect(self, *, forget: bool = False) -> None:

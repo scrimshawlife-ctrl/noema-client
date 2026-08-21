@@ -45,6 +45,11 @@ ARGUMENT_KEYS = (
     "rule_id",
     "entity_id",
     "amount",
+    "counterparty_id",
+    "offered",
+    "requested",
+    "phase",
+    "trade_id",
 )
 
 
