@@ -66,6 +66,15 @@ def test_alias_expansion_appends_rest():
     assert proposal.target_id == "scarred-conduit"
 
 
+def test_message_line_splits_handle_and_text():
+    proposal = proposal_from_line("message hermes ping the vault")
+    assert proposal is not None
+    assert proposal.action == "MESSAGE"
+    assert proposal.target_id == "hermes"
+    assert proposal.arguments["recipient_id"] == "hermes"
+    assert proposal.arguments["text"] == "ping the vault"
+
+
 def test_dock_expands_to_move_south():
     expanded = expand_aliases("dock", {"dock": "move south"})
     proposal = expand_proposal(ActionProposal(action="dock"), {"dock": "move south"})
