@@ -83,6 +83,37 @@ def visible_targets(obs: Observation) -> set[str]:
     return found
 
 
+def _resolve_visible_entity_id(obs: Observation, raw: str) -> str:
+    needle = str(raw or "").strip()
+    if not needle:
+        return needle
+    if needle.startswith("entity."):
+        return needle
+    for aff in obs.affordances or []:
+        if not aff.target_id:
+            continue
+        cmd = getattr(aff, "cmd", "") or ""
+        alabel = getattr(aff, "label", "") or ""
+        tlabel = getattr(aff, "target_label", "") or (aff.raw or {}).get("target_label") or ""
+        if cmd.endswith(needle) or alabel == needle or tlabel == needle:
+            return str(aff.target_id)
+    for ent in list(obs.entities or []) + list((obs.location or {}).get("entities") or []):
+        if isinstance(ent, dict) and (ent.get("label") == needle or ent.get("target_label") == needle):
+            entity_id = ent.get("entity_id")
+            if entity_id:
+                return str(entity_id)
+    return needle
+
+
+def _player_recipient(raw: str) -> str:
+    handle = str(raw or "").strip()
+    if not handle:
+        return handle
+    if handle.startswith(("player.", "entity.", "org.", "ctrl.")):
+        return handle
+    return f"player.{handle}"
+
+
 def advertised(obs: Observation, action: str, operation: str | None = None) -> bool:
     names = {action.upper()}
     if operation:
@@ -125,10 +156,19 @@ def validate_proposal(proposal: ActionProposal, obs: Observation, policy: Client
             args = {**args, "direction": direction}
         elif action == "INSPECT":
             entity_id = args.get("entity_id") or target
+            if entity_id:
+                entity_id = _resolve_visible_entity_id(obs, str(entity_id))
             if entity_id and (obs.entities or obs.affordances) and str(entity_id) not in visible_targets(obs):
                 raise NoemaActionRejected("INVALID_PROPOSAL", "target not visible", failure=FailureClass.INVALID_PROPOSAL)
             if entity_id:
                 args = {**args, "entity_id": entity_id}
+        elif action == "MESSAGE":
+            recipient = args.get("recipient_id") or args.get("handle") or target
+            text = args.get("text") or (args.get("message") if isinstance(args.get("message"), str) else None)
+            if recipient:
+                args["recipient_id"] = _player_recipient(str(recipient))
+            if text:
+                args["text"] = text
         return ValidatedAction(command=command, arguments=args, mutating=mutating)
     build_op = operation if operation in _BUILD else (action if action in _BUILD else None)
     if action == "BUILD" or build_op:

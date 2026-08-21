@@ -29,6 +29,7 @@ class FakeNoema:
         self.resync_remaining = 0
         self.fail_command: str | None = None
         self.fail_error: dict[str, Any] = {"code": "ACTION_REJECTED", "message": "rejected"}
+        self.observe_requires_enter = False
 
     def observation(self) -> dict[str, Any]:
         return {
@@ -141,6 +142,12 @@ class FakeNoema:
                 return 409, {"ok": False, "error": {"code": "WORLD_PAUSED"}, "world_status": "PAUSED"}
             if self.world_status == "INCIDENT" and command not in {"LOOK", "OBSERVE"}:
                 return 409, {"ok": False, "error": {"code": "WORLD_INCIDENT"}, "world_status": "INCIDENT"}
+            if self.observe_requires_enter and not self.in_world and command in {"LOOK", "OBSERVE"}:
+                return 409, {
+                    "ok": False,
+                    "error": {"code": "NOT_IN_WORLD", "message": "enter first"},
+                    "world_status": self.world_status,
+                }
             if command == "ENTER_WORLD":
                 self.in_world = True
             self.sequence += 1

@@ -286,6 +286,21 @@ def test_cli_status_no_token(tmp_path: Path, monkeypatch):
     assert rc == 0
 
 
+def test_cli_act_enter_world_skips_observe_on_fresh_session(tmp_path: Path):
+    fake = FakeNoema()
+    fake.observe_requires_enter = True
+    origin, httpd, _ = serve_fake(fake)
+    try:
+        save_credential(StoredCredential(access_token="tok.fixture-secret", server=origin), tmp_path)
+        rc = cli_main(["--config-dir", str(tmp_path), "act", "ENTER_WORLD"])
+        assert rc == 0
+        assert fake.in_world is True
+        assert any(c.get("command") == "ENTER_WORLD" for c in fake.commands)
+        assert not any(c.get("command") in {"LOOK", "OBSERVE"} for c in fake.commands)
+    finally:
+        httpd.shutdown()
+
+
 def test_admit_isolated_world_id():
     assert is_isolated_world("test.hosted-canonical.client-proof")
     assert not is_isolated_world("world.perihelion-reach")

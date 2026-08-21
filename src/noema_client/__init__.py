@@ -17,7 +17,7 @@ from noema_client.errors import (
 from noema_client.affordances import proposal_from_affordance
 from noema_client.types import ActionProposal, Affordance, Observation
 
-__version__ = "0.1.9"
+__version__ = "0.1.10"
 __all__ = [
     "ActionProposal",
     "Affordance",
