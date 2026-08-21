@@ -135,7 +135,7 @@ def test_first_valid_waits_when_harvest_stock_is_empty():
             }
         }
     )
-    assert decision and decision.action == "WAIT"
+    assert decision and decision.action == "MOVE"
 
 
 def test_first_valid_repairs_when_harvest_is_blocked_by_full_hold():

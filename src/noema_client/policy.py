@@ -14,8 +14,8 @@ class ClientPolicy:
     allow_repair: bool = True
     allow_harvest: bool = True
     allow_message: bool = True
-    allow_org_create: bool = False
-    allow_contest: bool = False
+    allow_org_create: bool = True
+    allow_contest: bool = True
     allow_access: bool = False
     stop_on_incident: bool = True
     stop_on_auth_failure: bool = True
@@ -68,3 +68,20 @@ class ClientPolicy:
         if name.startswith("ACCESS"):
             return self.allow_access
         return False
+
+    def blocked_advertised(self, obs: object) -> list[str]:
+        """Advertised affordances this policy would deny. For doctor/status."""
+        blocked: list[str] = []
+        seen: set[str] = set()
+        affs = getattr(obs, "affordances", None) or []
+        for aff in affs:
+            action = str(getattr(aff, "action", None) or "").upper()
+            raw = getattr(aff, "raw", None) or {}
+            operation = str((raw.get("operation") if isinstance(raw, dict) else "") or "").upper()
+            name = operation or action
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            if not self.permits(name) and not (action and self.permits(action)):
+                blocked.append(name)
+        return blocked

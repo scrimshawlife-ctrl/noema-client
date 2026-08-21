@@ -219,6 +219,32 @@ def proposal_from_line(line: str) -> ActionProposal | None:
         if len(rest) > 1:
             arguments["text"] = " ".join(rest[1:])
         return ActionProposal(action=action, target_id=rest[0], arguments=arguments)
+    if action == "TRADE" and rest:
+        arguments["phase"] = "propose"
+        arguments["counterparty_id"] = rest[0] if rest[0].startswith("player.") else f"player.{rest[0]}"
+        offered: dict[str, int] = {}
+        requested: dict[str, int] = {}
+        dest = offered
+        for tok in rest[1:]:
+            low = tok.lower()
+            if low in {"for", "request", "requested"}:
+                dest = requested
+                continue
+            if "=" in tok:
+                k, v = tok.split("=", 1)
+                try:
+                    dest[k] = int(v)
+                except ValueError:
+                    continue
+        if dest is offered and len(offered) >= 2:
+            items = list(offered.items())
+            offered = {items[0][0]: items[0][1]}
+            requested = dict(items[1:])
+        if offered:
+            arguments["offered"] = offered
+        if requested:
+            arguments["requested"] = requested
+        return ActionProposal(action=action, target_id=arguments["counterparty_id"], arguments=arguments)
     if arg_key and target:
         arguments[arg_key] = target
     target_id = target if arg_key == "entity_id" else None

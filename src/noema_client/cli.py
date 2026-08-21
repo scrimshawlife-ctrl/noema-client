@@ -10,7 +10,7 @@ from pathlib import Path
 from noema_client.aliases import apply_alias_command, parse_alias_command
 from noema_client.client import NoemaClient
 from noema_client.config import load_aliases, save_aliases
-from noema_client.errors import NoemaError
+from noema_client.errors import NoemaActionRejected, NoemaError
 from noema_client.observations import render_observation
 from noema_client.seal import refused_play_flag
 from noema_client.types import ActionProposal
@@ -99,8 +99,15 @@ def cmd_act(ns: argparse.Namespace) -> int:
     if action_upper != "ENTER_WORLD":
         try:
             client.observe()
-        except Exception:
-            pass
+        except NoemaActionRejected as exc:
+            if exc.code == "NOT_IN_WORLD":
+                client.ensure_in_world()
+            else:
+                print(f"{exc.code}: {exc.message}", file=sys.stderr)
+                return 1
+        except NoemaError as exc:
+            print(f"{exc.code}: {exc.message}", file=sys.stderr)
+            return 1
     args: dict = {}
     if ns.arguments:
         args = json.loads(ns.arguments)
