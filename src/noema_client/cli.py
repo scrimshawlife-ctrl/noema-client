@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -16,6 +17,8 @@ from noema_client.seal import refused_play_flag
 from noema_client.types import ActionProposal
 
 BANNED = ("goal", "brief", "system", "hidden_prompt", "prompt")
+
+_log = logging.getLogger("noema_client.cli")
 
 
 def _client(ns: argparse.Namespace) -> NoemaClient:
@@ -99,8 +102,20 @@ def cmd_act(ns: argparse.Namespace) -> int:
     if action_upper != "ENTER_WORLD":
         try:
             client.observe()
-        except Exception:
-            pass
+        except NoemaError as exc:
+            if exc.code == "NOT_IN_WORLD":
+                # The server-side in-world binding expires independently of the
+                # JWT (#17). Re-enter (idempotent) and retry observe once so the
+                # act below validates against the real affordance list instead
+                # of a stale one — otherwise the client-side check misreports
+                # the action as "not advertised". A failure here propagates to
+                # main() and prints the true cause.
+                client.act(ActionProposal(action="ENTER_WORLD"))
+                client.observe()
+            else:
+                _log.debug("pre-act observe failed: %s", exc)
+        except Exception as exc:
+            _log.debug("pre-act observe failed: %s", exc)
     args: dict = {}
     if ns.arguments:
         args = json.loads(ns.arguments)

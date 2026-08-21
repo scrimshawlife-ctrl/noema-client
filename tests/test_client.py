@@ -585,3 +585,51 @@ def test_play_continues_after_settlement_race(tmp_path: Path):
     assert turns[0].stopped is False
     assert turns[1].ok is True
     assert turns[2].ok is True
+
+
+def test_cli_act_recovers_from_expired_in_world_binding(tmp_path: Path):
+    """#17: NOT_IN_WORLD from the pre-act observe must trigger re-enter + retry,
+    not be swallowed into a misleading 'is not advertised' failure."""
+    fake = FakeNoema()
+    fake.observe_requires_enter = True
+    fake.in_world = False  # world-session expired; JWT still valid
+    origin, httpd, _ = serve_fake(fake)
+    try:
+        save_credential(StoredCredential(access_token="tok.fixture-secret", server=origin), tmp_path)
+        rc = cli_main(["--config-dir", str(tmp_path), "act", "LOOK"])
+        assert rc == 0
+        sent = [c.get("command") for c in fake.commands]
+        # auto ENTER_WORLD before the action; observe retried; LOOK succeeds
+        assert "ENTER_WORLD" in sent
+        assert sent.index("ENTER_WORLD") < sent.index("LOOK")
+        assert fake.in_world is True
+    finally:
+        httpd.shutdown()
+
+
+def test_cli_act_still_best_effort_on_other_observe_failures(tmp_path: Path, monkeypatch):
+    """Non-NOT_IN_WORLD observe failures stay best-effort (logged, not fatal)."""
+    from noema_client import cli as cli_mod
+    from noema_client.errors import NoemaTransportError
+
+    fake = FakeNoema()
+    origin, httpd, _ = serve_fake(fake)
+    try:
+        save_credential(StoredCredential(access_token="tok.fixture-secret", server=origin), tmp_path)
+        real_observe = cli_mod.NoemaClient.observe
+        calls = {"n": 0}
+
+        def flaky_observe(self):
+            if calls["n"] == 0:
+                calls["n"] += 1
+                raise NoemaTransportError("TIMEOUT", "lost response", retryable=True)
+            return real_observe(self)
+
+        monkeypatch.setattr(cli_mod.NoemaClient, "observe", flaky_observe)
+        rc = cli_main(["--config-dir", str(tmp_path), "act", "LOOK"])
+        assert rc == 0
+        sent = [c.get("command") for c in fake.commands]
+        assert "LOOK" in sent
+        assert "ENTER_WORLD" not in sent  # no spurious re-enter for transport blips
+    finally:
+        httpd.shutdown()
