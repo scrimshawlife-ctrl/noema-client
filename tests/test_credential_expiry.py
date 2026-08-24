@@ -6,13 +6,13 @@ import base64
 import json
 from pathlib import Path
 
+from fake_server import FakeNoema, serve_fake
 from noema_client.auth import credential_state
 from noema_client.cli import main as cli_main
 from noema_client.client import NoemaClient
 from noema_client.config import StoredCredential, load_credential, save_credential
 from noema_client.errors import NoemaAuthError
 from noema_client.transport import default_http
-from fake_server import FakeNoema, serve_fake
 
 
 def _b64url(data: bytes) -> str:
