@@ -30,6 +30,8 @@ class FakeNoema:
         self.fail_command: str | None = None
         self.fail_error: dict[str, Any] = {"code": "ACTION_REJECTED", "message": "rejected"}
         self.observe_requires_enter = False
+        self.device_starts = 0
+        self.auto_approve = False
 
     def observation(self) -> dict[str, Any]:
         return {
@@ -70,6 +72,7 @@ class FakeNoema:
         if method == "GET" and path == "/health":
             return 200, {"status": "ok", "protocol_version": "1"}
         if method == "POST" and path == "/v1/auth/device":
+            self.device_starts += 1
             rec = {
                 "device_code": "dev.fixture",
                 "user_code": "7KMP-41QZ",
@@ -79,6 +82,8 @@ class FakeNoema:
                 "status": "authorization_pending",
             }
             self.pending[rec["device_code"]] = rec
+            if self.auto_approve:
+                self.approve(rec["device_code"])
             return 200, rec
         if method == "POST" and path == "/v1/auth/device/token":
             code = str(body.get("device_code") or "")

@@ -19,7 +19,7 @@ from noema_client.aliases import (
     should_stop_macro,
 )
 from noema_client.adapters.scripted import FirstValidAffordanceAdapter
-from noema_client.auth import DeviceEnrollment, StaticTokenProvider
+from noema_client.auth import DeviceEnrollment, StaticTokenProvider, credential_state
 from noema_client.config import (
     DEFAULT_SERVER,
     StoredCredential,
@@ -124,16 +124,29 @@ class NoemaClient:
         self.telemetry.record(event="discover", protocol=self.discovery.protocol, transport="http")
         return self.discovery
 
-    def connect(self, *, announce: Callable[[str], None] | None = None) -> StoredCredential:
+    def connect(self, *, announce: Callable[[str], None] | None = None, force: bool = False) -> StoredCredential:
         if refused_play_flag(self):
             raise NoemaError("SEAL", "live play flags are refused")
         if self.discovery is None:
             self.discover()
         cred = self._credential
-        if cred and cred.access_token:
+        state = credential_state(cred.access_token if cred else None)
+        if cred and cred.access_token and not force and state == "stored":
             self._bind_gateway(cred)
             self.session.connected = True
             return cred
+        if announce:
+            if force and cred and cred.access_token:
+                announce("Forcing re-enrollment.")
+            elif state in {"expired", "invalid"}:
+                announce(f"Stored credential is {state}. Starting device enrollment.")
+        if self._gateway is not None:
+            try:
+                self._gateway.close()
+            except Exception:
+                pass
+            self._gateway = None
+        self.session.connected = False
         enrollment = DeviceEnrollment(self.server, runtime=self.runtime, http=self._http, announce=announce)
         meta = enrollment.start()
         enrollment.poll_until_ready()
@@ -242,6 +255,13 @@ class NoemaClient:
             cred = self._credential or load_credential(self.config_home)
             if not cred:
                 raise NoemaAuthError("AUTH_REQUIRED", "not connected")
+            state = credential_state(cred.access_token)
+            if state in {"expired", "invalid"}:
+                raise NoemaAuthError(
+                    "NOT_AUTHORIZED",
+                    f"stored credential is {state}; run noema connect",
+                    failure=FailureClass.AUTH_REQUIRED,
+                )
             self._credential = cred
             if self.discovery is None:
                 self.discover()
@@ -384,10 +404,11 @@ class NoemaClient:
 
     def status(self) -> dict[str, Any]:
         cred = self._credential
+        state = credential_state(cred.access_token if cred else None)
         blocked = self.policy.blocked_advertised(self.observation) if self.observation else []
         return {
             "server": self.server,
-            "connected": self.session.connected or bool(cred),
+            "connected": state == "stored",
             "protocol": self.session.protocol,
             "world": self.session.world,
             "world_id": self.world_id,
@@ -397,7 +418,7 @@ class NoemaClient:
             "controller_type": "agent",
             "transport": self.session.transport,
             "seal": "sent" if self.session.seal_sent or self.seal else "none",
-            "credential": "stored" if cred else "missing",
+            "credential": state,
             "admin_header": "present" if self._admin_token else "missing",
             "resume": self.session.resume,
             "cycle": self.session.cycle,
@@ -406,10 +427,11 @@ class NoemaClient:
         }
 
     def doctor(self) -> dict[str, Any]:
+        cred = self._credential or load_credential(self.config_home)
         report: dict[str, Any] = {
             "config_dir": str(self.config_home),
             "config_dir_mode": _mode(self.config_home),
-            "credential": "present" if load_credential(self.config_home) else "missing",
+            "credential": credential_state(cred.access_token if cred else None),
             "server": self.server,
         }
         try:

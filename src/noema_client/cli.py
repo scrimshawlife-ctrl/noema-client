@@ -52,7 +52,7 @@ def cmd_connect(ns: argparse.Namespace) -> int:
         else:
             print(msg)
 
-    cred = client.connect(announce=announce)
+    cred = client.connect(announce=announce, force=bool(getattr(ns, "force", False)))
     print()
     print("Connected.")
     print()
@@ -145,7 +145,8 @@ def cmd_doctor(ns: argparse.Namespace) -> int:
     else:
         for key, value in report.items():
             print(f"{key}: {value}")
-    return 0 if report.get("reachability") == "ok" else 1
+    credential_ok = report.get("credential") not in {"expired", "invalid"}
+    return 0 if report.get("reachability") == "ok" and credential_ok else 1
 
 
 def cmd_disconnect(ns: argparse.Namespace) -> int:
@@ -225,6 +226,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_connect = sub.add_parser("connect", help="device enrollment")
+    p_connect.add_argument(
+        "--force",
+        action="store_true",
+        help="re-enroll even if a stored credential looks usable",
+    )
     p_connect.set_defaults(func=cmd_connect)
 
     p_status = sub.add_parser("status", help="connection status")
