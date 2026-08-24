@@ -5,12 +5,54 @@ Adapted from Zero-State-LLC/Noema src/noema/harness/auth.py.
 
 from __future__ import annotations
 
+import base64
+import json
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from noema_client.errors import FailureClass, NoemaAuthError
 
 HttpFn = Callable[..., dict[str, Any]]
+CredentialState = Literal["stored", "expired", "invalid", "missing"]
+
+
+def _b64url_json(segment: str) -> dict[str, Any] | None:
+    try:
+        pad = "=" * (-len(segment) % 4)
+        raw = base64.urlsafe_b64decode(segment + pad)
+        data = json.loads(raw.decode("utf-8"))
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def credential_state(token: str | None, *, now: float | None = None) -> CredentialState:
+    """Classify a stored access token without verifying the signature or contacting NOEMA.
+
+    Opaque (non-JWT) tokens stay ``stored`` because expiry cannot be read locally.
+    JWT-shaped tokens are ``expired`` when ``exp`` is in the past, ``invalid`` when
+    the payload cannot be decoded, and ``stored`` otherwise.
+    """
+    raw = str(token or "").strip()
+    if not raw:
+        return "missing"
+    parts = raw.split(".")
+    if len(parts) != 3 or not all(parts):
+        return "stored"
+    payload = _b64url_json(parts[1])
+    if payload is None:
+        return "invalid"
+    exp = payload.get("exp")
+    if exp is None:
+        return "stored"
+    try:
+        exp_ts = float(exp)
+    except (TypeError, ValueError):
+        return "invalid"
+    clock = time.time() if now is None else float(now)
+    if clock >= exp_ts:
+        return "expired"
+    return "stored"
 
 
 class StaticTokenProvider:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "noema-client"
-version = "0.1.15"
+version = "0.1.16"
 description = "Official first-party Controller client for NOEMA. The model proposes. The client constrains and transports. NOEMA decides."
 readme = "README.md"
 requires-python = ">=3.11"
