@@ -10,6 +10,16 @@ from noema_client.client import NoemaClient
 from noema_client.types import ActionProposal, CommandResult, Observation
 
 PRODUCTION_SERVER = "https://noema.guru"
+CONSTRUCT_CARGO = {
+    "relay": 4,
+    "generator": 5,
+    "storage_bay": 6,
+    "production_node": 4,
+    "route_link": 4,
+    "workshop": 5,
+    "defensive_work": 4,
+    "archive_annex": 4,
+}
 
 
 @dataclass(frozen=True)
@@ -29,7 +39,7 @@ def validate_materials_gate(*, server: str, world_id: str, ack: str, run_id: str
         raise AcceptanceError("RUN_ID_INVALID", "run id must be 3-64 lowercase safe characters")
 
 
-def _available_harvest(obs: Observation, target_id: str | None) -> str:
+def _available_harvest(obs: Observation, target_id: str | None, amount: int) -> str:
     candidates = [
         aff
         for aff in obs.affordances
@@ -37,11 +47,18 @@ def _available_harvest(obs: Observation, target_id: str | None) -> str:
     ]
     if not candidates:
         raise AcceptanceError("HARVEST_UNAVAILABLE", "no available HARVEST affordance")
-    if target_id is None:
-        return str(candidates[0].target_id)
-    if not any(aff.target_id == target_id for aff in candidates):
+    target = str(candidates[0].target_id) if target_id is None else target_id
+    if not any(aff.target_id == target for aff in candidates):
         raise AcceptanceError("HARVEST_TARGET_UNAVAILABLE", "requested HARVEST target is unavailable")
-    return target_id
+    entities = (obs.location or {}).get("entities") or []
+    entity = next((item for item in entities if isinstance(item, dict) and item.get("entity_id") == target), None)
+    if (
+        entity is not None
+        and isinstance(entity.get("stock_amount"), (int, float))
+        and entity["stock_amount"] < amount
+    ):
+        raise AcceptanceError("HARVEST_STOCK_INSUFFICIENT", "HARVEST target lacks required cargo")
+    return target
 
 
 def _sequence(result: CommandResult) -> int | None:
@@ -86,6 +103,9 @@ def run_materials_acceptance(
     construct_class: str = "workshop",
 ) -> dict[str, Any]:
     validate_materials_gate(server=client.server, world_id=world_id, ack=ack, run_id=run_id)
+    cargo_need = CONSTRUCT_CARGO.get(construct_class)
+    if cargo_need is None:
+        raise AcceptanceError("CONSTRUCT_CLASS_INVALID", "unsupported construction class")
     ready_world = _ready_world(ready)
     if ready_world.get("world_id") != world_id:
         raise AcceptanceError("WORLD_MISMATCH", "ready world does not match the pinned world")
@@ -95,10 +115,10 @@ def run_materials_acceptance(
         raise AcceptanceError("WORLD_NOT_HEALTHY", "world must be ACTIVE and HEALTHY")
 
     observed = client.observe()
-    target = _available_harvest(observed, harvest_target)
+    target = _available_harvest(observed, harvest_target, cargo_need)
     before_sequence = observed.sequence
     harvested = client.act(
-        ActionProposal(action="HARVEST", target_id=target, arguments={"amount": 1}),
+        ActionProposal(action="HARVEST", target_id=target, arguments={"amount": cargo_need}),
         idempotency_key=f"accept.materials.{run_id}.harvest",
         request_id=f"accept.materials.{run_id}.harvest",
     )
@@ -127,6 +147,6 @@ def run_materials_acceptance(
         "ok": True,
         "run_id": run_id,
         "world_id": world_id,
-        "harvest": {"target_id": target, "settled": True, "sequence": harvest_sequence},
+        "harvest": {"target_id": target, "amount": cargo_need, "settled": True, "sequence": harvest_sequence},
         "construct": {"class": construct_class, "settled": True, "sequence": construct_sequence},
     }

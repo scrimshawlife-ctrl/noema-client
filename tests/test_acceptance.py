@@ -111,7 +111,7 @@ def test_acceptance_runs_harvest_then_construct_with_stable_retry_keys():
         "ok": True,
         "run_id": RUN,
         "world_id": WORLD,
-        "harvest": {"target_id": "entity.salvage-cache", "settled": True, "sequence": 11},
+        "harvest": {"target_id": "entity.salvage-cache", "amount": 5, "settled": True, "sequence": 11},
         "construct": {"class": "workshop", "settled": True, "sequence": 12},
     }
     assert [call[0].action for call in client.calls] == ["HARVEST", "BUILD"]
@@ -135,6 +135,30 @@ def test_acceptance_accepts_nested_production_ready_world():
         run_id=RUN,
     )
     assert output["ok"] is True
+
+
+def test_acceptance_refuses_stock_below_construct_cargo_requirement():
+    client = StubClient()
+    observed = client.observe()
+    observed.location = {
+        "entities": [
+            {
+                "entity_id": "entity.salvage-cache",
+                "stock_resource": "materials",
+                "stock_amount": 4.9,
+            }
+        ]
+    }
+    client.observe = lambda: observed  # type: ignore[method-assign]
+    with pytest.raises(AcceptanceError, match="HARVEST_STOCK_INSUFFICIENT"):
+        run_materials_acceptance(
+            client,  # type: ignore[arg-type]
+            ready=ready(),
+            world_id=WORLD,
+            ack=f"MUTATE {WORLD}",
+            run_id=RUN,
+        )
+    assert client.calls == []
 
 
 def test_acceptance_stops_before_construct_without_cargo_receipt():
@@ -236,7 +260,7 @@ def test_acceptance_uses_public_client_validation_and_transport(tmp_path):
         ("OBSERVE", {}, {}),
         (
             "COMMIT",
-            {"amount": 1, "operation": "HARVEST", "entity_id": "entity.salvage-cache"},
+            {"amount": 5, "operation": "HARVEST", "entity_id": "entity.salvage-cache"},
             {
                 "idempotency_key": f"accept.materials.{RUN}.harvest",
                 "request_id": f"accept.materials.{RUN}.harvest",
