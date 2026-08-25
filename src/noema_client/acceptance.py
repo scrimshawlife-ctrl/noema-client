@@ -66,12 +66,19 @@ def _sequence(result: CommandResult) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def _cargo_observed(result: CommandResult) -> bool:
+def _cargo_observed(result: CommandResult, *, before_storage: float | None = None, amount: int = 0) -> bool:
     obs = result.observation or {}
     cargo = obs.get("cargo")
     if isinstance(cargo, (dict, list)) and bool(cargo):
         return True
-    return any("cargo" in str(line).lower() for line in (obs.get("lot_lines") or []))
+    if any("cargo" in str(line).lower() for line in (obs.get("lot_lines") or [])):
+        return True
+    after_storage = (obs.get("budgets") or {}).get("storage")
+    return (
+        isinstance(before_storage, (int, float))
+        and isinstance(after_storage, (int, float))
+        and before_storage - after_storage >= amount
+    )
 
 
 def _construction_observed(result: CommandResult) -> bool:
@@ -117,6 +124,7 @@ def run_materials_acceptance(
     observed = client.observe()
     target = _available_harvest(observed, harvest_target, cargo_need)
     before_sequence = observed.sequence
+    before_storage = (observed.resources or {}).get("storage")
     harvested = client.act(
         ActionProposal(action="HARVEST", target_id=target, arguments={"amount": cargo_need}),
         idempotency_key=f"accept.materials.{run_id}.harvest",
@@ -127,7 +135,7 @@ def run_materials_acceptance(
     harvest_sequence = _sequence(harvested)
     if before_sequence is not None and harvest_sequence is not None and harvest_sequence <= before_sequence:
         raise AcceptanceError("HARVEST_RECEIPT_INVALID", "HARVEST sequence did not advance")
-    if not _cargo_observed(harvested):
+    if not _cargo_observed(harvested, before_storage=before_storage, amount=cargo_need):
         raise AcceptanceError("CARGO_NOT_OBSERVED", "HARVEST did not expose cargo evidence")
 
     constructed = client.act(
