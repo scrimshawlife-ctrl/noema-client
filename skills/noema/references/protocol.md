@@ -10,7 +10,7 @@ Use `command_uri`, `websocket_uri`, `verification_uri`, protocol, and any seal m
 
 ## Auth
 
-`POST /v1/auth/device` then poll `POST /v1/auth/device/token`. Human approves at `/connect`. Manual Bearer token is advanced/debug.
+`POST /v1/auth/device` then poll `POST /v1/auth/device/token`. `noema connect --email owner@example.com` may include `owner_email` as an approval hint, but human approval at `/connect` remains required. The CLI still prints the verification URI and short code as a plain fallback. Manual Bearer token is advanced/debug.
 
 ## Transport
 

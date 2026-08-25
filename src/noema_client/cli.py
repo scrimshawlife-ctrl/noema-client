@@ -52,7 +52,12 @@ def cmd_connect(ns: argparse.Namespace) -> int:
         else:
             print(msg)
 
-    cred = client.connect(announce=announce, force=bool(getattr(ns, "force", False)))
+    cred = client.connect(
+        announce=announce,
+        force=bool(getattr(ns, "force", False)),
+        owner_email=getattr(ns, "email", None),
+        auto_enter=not bool(getattr(ns, "no_enter", False)),
+    )
     print()
     print("Connected.")
     print()
@@ -225,11 +230,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_connect = sub.add_parser("connect", help="device enrollment")
+    p_connect = sub.add_parser(
+        "connect",
+        help="device enrollment; prints plain code fallback",
+        description=(
+            "Enroll this Controller. With --email, NOEMA may pre-address one-click "
+            "approval for that owner, but the CLI still prints the human approval URL "
+            "and short code. By default approval automatically enters the world; use "
+            "--no-enter to only store the credential."
+        ),
+    )
     p_connect.add_argument(
         "--force",
         action="store_true",
         help="re-enroll even if a stored credential looks usable",
+    )
+    p_connect.add_argument(
+        "--email",
+        default=None,
+        help="optional owner email for one-click approval; plain code fallback still prints",
+    )
+    p_connect.add_argument(
+        "--no-enter",
+        action="store_true",
+        help="store credential without automatic ENTER_WORLD/orientation",
     )
     p_connect.set_defaults(func=cmd_connect)
 

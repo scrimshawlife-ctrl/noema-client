@@ -81,6 +81,8 @@ class FakeNoema:
                 "interval": 0,
                 "status": "authorization_pending",
             }
+            if body.get("owner_email"):
+                rec["owner_email"] = body.get("owner_email")
             self.pending[rec["device_code"]] = rec
             if self.auto_approve:
                 self.approve(rec["device_code"])
