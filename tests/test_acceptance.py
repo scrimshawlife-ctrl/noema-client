@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from noema_client.acceptance import AcceptanceError, run_materials_acceptance, validate_materials_gate
+from noema_client.acceptance import (
+    AcceptanceError,
+    run_materials_acceptance,
+    validate_materials_gate,
+)
 from noema_client.cli import main
 from noema_client.client import NoemaClient
 from noema_client.types import Affordance, CommandResult, Observation
-
 
 WORLD = "world.perihelion-reach-3"
 RUN = "roadmap-579-a"
@@ -52,6 +55,15 @@ class StubClient:
 
 def ready() -> dict:
     return {"world_id": WORLD, "status": "ACTIVE", "settlement_health": "HEALTHY"}
+
+
+def production_ready() -> dict:
+    return {
+        "ready": True,
+        "status": "ACTIVE",
+        "settlement_health": "HEALTHY",
+        "world": ready(),
+    }
 
 
 def test_gate_refuses_wrong_ack_before_client_or_network(tmp_path, capsys):
@@ -111,6 +123,18 @@ def test_acceptance_runs_harvest_then_construct_with_stable_retry_keys():
         f"accept.materials.{RUN}.construct",
         f"accept.materials.{RUN}.construct",
     )
+
+
+def test_acceptance_accepts_nested_production_ready_world():
+    client = StubClient()
+    output = run_materials_acceptance(
+        client,  # type: ignore[arg-type]
+        ready=production_ready(),
+        world_id=WORLD,
+        ack=f"MUTATE {WORLD}",
+        run_id=RUN,
+    )
+    assert output["ok"] is True
 
 
 def test_acceptance_stops_before_construct_without_cargo_receipt():
