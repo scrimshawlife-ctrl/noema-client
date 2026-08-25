@@ -70,6 +70,11 @@ def _construction_observed(result: CommandResult) -> bool:
     return any(word in consequence for word in ("construct", "built", "created"))
 
 
+def _ready_world(ready: dict[str, Any]) -> dict[str, Any]:
+    world = ready.get("world")
+    return world if isinstance(world, dict) else ready
+
+
 def run_materials_acceptance(
     client: NoemaClient,
     *,
@@ -81,10 +86,11 @@ def run_materials_acceptance(
     construct_class: str = "workshop",
 ) -> dict[str, Any]:
     validate_materials_gate(server=client.server, world_id=world_id, ack=ack, run_id=run_id)
-    if ready.get("world_id") != world_id:
+    ready_world = _ready_world(ready)
+    if ready_world.get("world_id") != world_id:
         raise AcceptanceError("WORLD_MISMATCH", "ready world does not match the pinned world")
-    if str(ready.get("status") or "").upper() != "ACTIVE" or str(
-        ready.get("settlement_health") or ""
+    if str(ready_world.get("status") or "").upper() != "ACTIVE" or str(
+        ready_world.get("settlement_health") or ""
     ).upper() != "HEALTHY":
         raise AcceptanceError("WORLD_NOT_HEALTHY", "world must be ACTIVE and HEALTHY")
 
