@@ -15,11 +15,16 @@ WORLD = "world.perihelion-reach-3"
 RUN = "roadmap-579-a"
 
 
-def result(*, sequence: int, cargo: bool = False, constructed: bool = False) -> CommandResult:
+def result(
+    *, sequence: int, cargo: bool = False, constructed: bool = False, storage: int | None = None
+) -> CommandResult:
     raw = {"events": [{"event_type": "CONSTRUCT_COMPLETED"}]} if constructed else {}
+    observation = {"sequence": sequence, "lot_lines": ["Cargo: 1 lot"] if cargo else []}
+    if storage is not None:
+        observation["budgets"] = {"storage": storage}
     return CommandResult(
         ok=True,
-        observation={"sequence": sequence, "lot_lines": ["Cargo: 1 lot"] if cargo else []},
+        observation=observation,
         error=None,
         settled=True,
         http_status=200,
@@ -172,6 +177,31 @@ def test_acceptance_stops_before_construct_without_cargo_receipt():
             run_id=RUN,
         )
     assert [call[0].action for call in client.calls] == ["HARVEST"]
+
+
+def test_acceptance_accepts_canonical_storage_delta_as_cargo_evidence():
+    client = StubClient(cargo=False)
+    observed = client.observe()
+    observed.resources = {"storage": 16}
+    client.observe = lambda: observed  # type: ignore[method-assign]
+    original_act = client.act
+
+    def act(proposal, *, idempotency_key=None, request_id=None):
+        if proposal.action == "HARVEST":
+            client.calls.append((proposal, idempotency_key, request_id))
+            return result(sequence=11, storage=11)
+        return original_act(proposal, idempotency_key=idempotency_key, request_id=request_id)
+
+    client.act = act  # type: ignore[method-assign]
+    output = run_materials_acceptance(
+        client,  # type: ignore[arg-type]
+        ready=ready(),
+        world_id=WORLD,
+        ack=f"MUTATE {WORLD}",
+        run_id=RUN,
+    )
+    assert output["ok"] is True
+    assert [call[0].action for call in client.calls] == ["HARVEST", "BUILD"]
 
 
 def test_acceptance_fails_closed_without_construct_receipt():
