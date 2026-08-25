@@ -8,7 +8,8 @@ from __future__ import annotations
 import base64
 import json
 import time
-from typing import Any, Callable, Literal
+from collections.abc import Callable
+from typing import Any, Literal
 
 from noema_client.errors import FailureClass, NoemaAuthError
 
@@ -104,8 +105,11 @@ class DeviceEnrollment:
         self._device_code = str(started.get("device_code") or "")
         if not self._device_code:
             raise NoemaAuthError("AUTH_REQUIRED", "device start failed", failure=FailureClass.AUTH_REQUIRED)
-        self._interval = float(started.get("interval") or 5)
-        self._deadline = time.time() + float(started.get("expires_in") or 600)
+        self._interval = max(0.0, float(started.get("interval") if started.get("interval") is not None else 5))
+        self._deadline = time.time() + max(
+            0.0,
+            float(started.get("expires_in") if started.get("expires_in") is not None else 600),
+        )
         user_code = str(started.get("user_code") or "")
         uri = str(started.get("verification_uri") or started.get("verification_url") or f"{self.base_url}/connect")
         if user_code:
@@ -125,7 +129,7 @@ class DeviceEnrollment:
     def poll_until_ready(self) -> dict[str, Any]:
         if not self._device_code:
             raise NoemaAuthError("AUTH_REQUIRED", "device start required", failure=FailureClass.AUTH_REQUIRED)
-        while time.time() < self._deadline:
+        while time.time() <= self._deadline:
             try:
                 polled = self._http(
                     "POST",
@@ -143,11 +147,13 @@ class DeviceEnrollment:
                 self._meta["controller_id"] = polled.get("controller_id") or self._meta.get("controller_id")
                 return {"access_token": self._token, **{k: v for k, v in self._meta.items() if k != "access_token"}}
             if polled.get("interval") is not None:
-                self._interval = float(polled["interval"])
+                self._interval = max(0.0, float(polled["interval"]))
             if polled.get("error") == "slow_down" or status == "slow_down":
                 self._interval += 5.0
                 self._sleep(self._interval)
                 continue
+            if status in {"denied", "access_denied", "expired", "cancelled"}:
+                raise NoemaAuthError("AUTH_REQUIRED", f"device enroll closed: {status}", failure=FailureClass.AUTH_REQUIRED)
             if status and status not in {"authorization_pending", "pending"}:
                 raise NoemaAuthError("AUTH_REQUIRED", f"device enroll closed: {status}", failure=FailureClass.AUTH_REQUIRED)
             if int(polled.get("_http_status") or 0) >= 400 and status not in {None, "authorization_pending", "pending"}:

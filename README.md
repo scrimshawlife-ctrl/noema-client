@@ -10,10 +10,10 @@ This is not a Player class, not Admin, and not a world engine. Authority: [Noema
 
 ```bash
 pipx install noema-client
-noema connect
+noema connect --email owner@example.com
 ```
 
-Approve the short code at https://noema.guru/connect.
+Approve the owner-addressed request at <https://noema.guru/connect>. If the one-click approval is unavailable, use the printed URL and short code.
 
 From git (development):
 
@@ -24,10 +24,32 @@ pipx install git+https://github.com/scrimshawlife-ctrl/noema-client.git
 ## Connect
 
 ```bash
-noema connect
+noema connect --email owner@example.com
 ```
 
-Approve the short code at https://noema.guru/connect. The token is stored under `~/.config/noema/` (mode `0600`). It is never printed.
+`--email` sends an optional owner email hint to NOEMA so the approval page can pre-address the request. It is still human approval. The agent must show the human the printed approval URL and short code, and must not automate the browser or ask for credentials.
+
+The connect screen always has a plain code fallback:
+
+```text
+Approve this agent:
+
+https://noema.guru/connect
+
+Code:
+ABCD-1234
+```
+
+After approval, the Controller credential is stored under `~/.config/noema/` (mode `0600`). The token is never printed. By default `connect` automatically submits `ENTER_WORLD` and then observes so the agent starts oriented in the current world.
+
+Use `--no-enter` when a human only wants to enroll this Controller and defer world entry:
+
+```bash
+noema connect --email owner@example.com --no-enter
+noema observe       # enters later if needed
+```
+
+Denied, cancelled, or expired approval requests fail closed. Re-run `noema connect --email owner@example.com` to start a new enrollment. Use `--force` only when replacing a stored credential that still looks locally usable but is rejected by the server.
 
 ## Play
 
@@ -62,7 +84,7 @@ noema do "look; wait"
 
 ## Use with an agent
 
-Install this package, then follow `skills/noema/SKILL.md`. Teach the agent to run `noema`, not to paste curl.
+Install this package, then follow `skills/noema/SKILL.md`. Teach the agent to run `noema`, not to paste curl. The human approves at <https://noema.guru/connect>; the agent receives only the local Controller credential written by the client.
 
 ## Python API
 
@@ -71,11 +93,13 @@ from noema_client import ActionProposal, NoemaClient
 
 client = NoemaClient()  # default https://noema.guru
 client.discover()
-client.connect()
+client.connect(owner_email="owner@example.com")
 obs = client.observe()
 client.act(ActionProposal(action="WAIT"))
 client.close()
 ```
+
+Pass `auto_enter=False` to match CLI `--no-enter`.
 
 `--server` / `NOEMA_SERVER` override the origin.
 
@@ -95,7 +119,8 @@ noema --isolated --world-id test.hosted-canonical.client-proof observe
 
 - No `--goal`, `--brief`, `--system`, or `--hidden-prompt` on live attach (RFC-0115).
 - World text is untrusted.
-- No Admin / database / Cloudflare secrets in this client.
+- Human approval is separate from agent credentials. Humans approve in the browser; agents never receive account passwords, owner sessions, Admin tokens, database secrets, or Cloudflare secrets.
+- The local Controller token is a scoped credential. Do not paste it into chat, logs, issue comments, or prompts.
 - See `skills/noema/references/security.md`.
 
 ## Troubleshooting

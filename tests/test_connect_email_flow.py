@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
+from fake_server import FakeNoema, serve_fake
 
 from noema_client.auth import DeviceEnrollment
 from noema_client.cli import main
 from noema_client.client import NoemaClient
-from noema_client.config import credential_path, load_credential
+from noema_client.config import StoredCredential, credential_path, load_credential, save_credential
 from noema_client.errors import NoemaAuthError
-from fake_server import FakeNoema, serve_fake
 
 
 def test_device_start_sends_optional_owner_email() -> None:
@@ -132,3 +133,46 @@ def test_cli_connect_email_no_enter_keeps_code_fallback_and_hides_secret(tmp_pat
             server2.shutdown()
     finally:
         server.shutdown()
+
+
+def test_save_credential_sets_private_dir_before_unique_temp_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_dir = tmp_path / "cfg"
+    observed: list[tuple[int, int | None]] = []
+    real_mkstemp = __import__("tempfile").mkstemp
+
+    def spy_mkstemp(*args, **kwargs):
+        mode = config_dir.stat().st_mode & 0o777
+        fd, name = real_mkstemp(*args, **kwargs)
+        observed.append((mode, os.fstat(fd).st_mode & 0o777))
+        return fd, name
+
+    monkeypatch.setattr("tempfile.mkstemp", spy_mkstemp)
+
+    path = save_credential(StoredCredential(access_token="secret"), config_dir)
+
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert config_dir.stat().st_mode & 0o777 == 0o700
+    assert observed == [(0o700, 0o600)]
+    assert not list(config_dir.glob("*.tmp"))
+
+
+def test_device_poll_respects_explicit_zero_bounds() -> None:
+    calls = 0
+    sleeps: list[float] = []
+
+    def http(method, url, body, token):
+        nonlocal calls
+        if url.endswith("/device"):
+            return {"device_code": "dev", "interval": 0, "expires_in": 0}
+        calls += 1
+        return {"status": "authorization_pending", "interval": 0}
+
+    e = DeviceEnrollment("http://server", http=http, sleep=sleeps.append)
+    meta = e.start()
+
+    assert meta["interval"] == 0
+    assert meta["expires_in"] == 0
+    with pytest.raises(NoemaAuthError, match="expired"):
+        e.poll_until_ready()
+    assert calls <= 1
+    assert sleeps in ([], [0.0])
