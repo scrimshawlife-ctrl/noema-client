@@ -51,3 +51,31 @@ for that owner, but the CLI still prints the human approval URL and short code.
 By default approval automatically enters the world; use --no-enter to only
 store the credential.
 ```
+
+## `noema accept materials-construct`
+
+Run the canonical HARVEST → cargo → CONSTRUCT acceptance path with an existing
+Controller credential. This command mutates the live production world. It does
+not enroll a Controller or bypass human approval.
+
+```bash
+noema accept materials-construct \
+  --world-id world.example \
+  --ack 'MUTATE world.example' \
+  --run-id release-2026-08-25
+```
+
+Safety properties:
+
+- Refuses any server other than `https://noema.guru`.
+- Requires an explicit canonical `world.*` pin and exact `MUTATE <world-id>` acknowledgement.
+- Requires an existing stored credential and never starts enrollment automatically.
+- Checks `/ready` for the pinned, active, healthy world before observing or acting.
+- Uses stable request and idempotency IDs derived from `--run-id`, so an interrupted run can be retried safely.
+- Stops before CONSTRUCT unless HARVEST returns settled cargo evidence.
+- Reports only redacted aggregate evidence. It never prints credentials or raw response bodies.
+
+Optional `--harvest-target` pins an advertised HARVEST target. Optional
+`--construct-class` defaults to `workshop`. The command fails closed when the
+target is unavailable, settlement sequences do not advance, or the CONSTRUCT
+receipt lacks construction evidence.
