@@ -1,0 +1,105 @@
+{
+  "_source": "Zero-State-LLC/Noema workers/noema/src/actions.ts — every `cmd:` template emitted with an affordance.",
+  "_regenerate": "cd workers/noema && grep -no 'cmd: `[^`]*`' src/actions.ts | sed 's/.*cmd: //' | sort -u",
+  "_contract": "Each template is either parsed by the official client's friendly parser (entity-label commands an agent may type) or is structured_only: the autonomous loop sends it via proposal_from_affordance using target_id, never by re-parsing the text.",
+  "parsed": [
+    {
+      "template": "inspect ${e.label}",
+      "sample": "inspect salvage-cache",
+      "command": "INSPECT",
+      "entity_id": "entity.salvage-cache"
+    },
+    {
+      "template": "harvest ${e.label} 1",
+      "sample": "harvest salvage-cache 1",
+      "command": "COMMIT",
+      "operation": "HARVEST",
+      "entity_id": "entity.salvage-cache",
+      "amount": 1
+    },
+    {
+      "template": "repair ${e.label}",
+      "sample": "repair relay-7",
+      "command": "COMMIT",
+      "operation": "REPAIR",
+      "entity_id": "entity.relay-7"
+    },
+    {
+      "template": "repair ${e.label} overhaul",
+      "sample": "repair relay-7 overhaul",
+      "command": "COMMIT",
+      "operation": "REPAIR",
+      "entity_id": "entity.relay-7",
+      "extent": "overhaul"
+    },
+    {
+      "template": "dismantle ${e.label}",
+      "sample": "dismantle relay-7",
+      "command": "BUILD",
+      "operation": "DISMANTLE",
+      "entity_id": "entity.relay-7"
+    },
+    {
+      "template": "upgrade ${e.label}",
+      "sample": "upgrade relay-7",
+      "command": "BUILD",
+      "operation": "UPGRADE",
+      "entity_id": "entity.relay-7"
+    },
+    {
+      "template": "repurpose ${e.label}",
+      "sample": "repurpose relay-7",
+      "command": "BUILD",
+      "operation": "REPURPOSE",
+      "entity_id": "entity.relay-7"
+    },
+    {
+      "template": "restore ${e.label}",
+      "sample": "restore relay-7",
+      "command": "BUILD",
+      "operation": "RESTORE",
+      "entity_id": "entity.relay-7"
+    },
+    {
+      "template": "move ${x.direction}",
+      "sample": "move east",
+      "command": "MOVE",
+      "direction": "east"
+    }
+  ],
+  "structured_only": [
+    "accept ${t.trade_id}",
+    "access ${where} ${modeCmd} for ${org.org_id}${appliesCmd}",
+    "attest ${art.label} subject=${sub.entity_id} claim=${claim}",
+    "cancel ${t.trade_id}",
+    "connect ${e.label} to ${dest}",
+    "consent ${office.office_id} ${handle}",
+    "construct ${pretty}",
+    "contest ${formCmd} ${cmdTarget} stake=${stakeLine(stake)}",
+    "defend ${c.contest_id} stake=${stakeLine(stake)}",
+    "emergency activate ${org.org_id} ${template.template_id} ${e.entity_id}",
+    "emergency activate ${org.org_id} ${template.template_id} treasury",
+    "emergency revoke ${scope.scope_id}",
+    "focus ${spec.id}",
+    "form agreement ${typeCmd} with ${handle}",
+    "invite ${handle} to ${org.org_id} role=member",
+    "leave ${org.org_id}",
+    "message ${handle} \"hello\"",
+    "notice ${org.org_id} \"posted\"",
+    "office assign ${office.office_id} ${handle}",
+    "office create ${org.org_id} name=\"Notice\" profile=PUBLISH_NOTICE",
+    "office retire ${office.office_id}",
+    "reconstruct ${ent?.label || subject} \"${claim}\" evidence=${evCmd} private",
+    "reconstruct ${rec.subject_ref} \"${rec.claim}\" public",
+    "reject ${t.trade_id}",
+    "resign ${office.office_id}",
+    "revise ${rec.reconstruction_id} \"${claim}\"",
+    "share ${e.label} with ${handle}",
+    "succession designate ${office.office_id} ${handle}",
+    "succession rule ${office.office_id} member_order",
+    "terminate agreement ${agr.agreement_id} reason=mutual",
+    "trade ${handle} offer=energy:1 want=energy:1",
+    "vest ${e.label} to ${org.org_id}",
+    "withdraw ${c.contest_id}"
+  ]
+}

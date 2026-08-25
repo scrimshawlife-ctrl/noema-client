@@ -5,6 +5,10 @@ Adapted from Zero-State-LLC/Noema src/noema/harness/validate.py.
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
 from noema_client.errors import FailureClass, NoemaActionRejected
 from noema_client.policy import ClientPolicy
 from noema_client.types import ActionProposal, Observation, ValidatedAction
@@ -19,6 +23,23 @@ _DIRECT = {
     "INSPECT": ("INSPECT", False),
     "MESSAGE": ("MESSAGE", True),
     "TRADE": ("TRADE", True),
+}
+
+# Operations whose target names a visible world entity. Everything else in
+# _COMMIT targets an office, player, org or agreement, and must not be run
+# through the entity resolver.
+_ENTITY_TARGET_OPS = {
+    "HARVEST",
+    "REPAIR",
+    "DISMANTLE",
+    "UPGRADE",
+    "REPURPOSE",
+    "RESTORE",
+    "VEST",
+    "SHARE",
+    "CONNECT",
+    "RECONSTRUCT",
+    "ATTEST",
 }
 
 _BUILD = {
@@ -83,26 +104,96 @@ def visible_targets(obs: Observation) -> set[str]:
     return found
 
 
-def _resolve_visible_entity_id(obs: Observation, raw: str) -> str:
+def _normalize_label(raw: str) -> str:
+    """Case- and separator-insensitive label key.
+
+    `-`, `_` and whitespace are treated alike so an advertised `salvage-cache`
+    matches a typed `salvage cache`. This never widens the candidate set beyond
+    what the observation already made visible.
+    """
+    return re.sub(r"[\s_-]+", " ", str(raw or "").strip().lower()).strip()
+
+
+@dataclass(frozen=True)
+class TargetResolution:
+    ok: bool
+    entity_id: str | None = None
+    code: str | None = None
+    message: str | None = None
+    choices: tuple[str, ...] = field(default_factory=tuple)
+
+
+def _visible_entity_index(obs: Observation) -> tuple[set[str], dict[str, set[str]]]:
+    """Visible entity ids, and normalized label -> set of entity ids.
+
+    Only the current observation is consulted: its entities, its location
+    entities, and its affordances. Nothing else can become a target.
+    """
+    ids: set[str] = set()
+    by_label: dict[str, set[str]] = {}
+
+    def note(entity_id: Any, *labels: Any) -> None:
+        if not entity_id:
+            return
+        eid = str(entity_id)
+        ids.add(eid)
+        for label in labels:
+            key = _normalize_label(label) if label else ""
+            if key:
+                by_label.setdefault(key, set()).add(eid)
+
+    for ent in list(obs.entities or []) + list((obs.location or {}).get("entities") or []):
+        if isinstance(ent, dict):
+            note(ent.get("entity_id"), ent.get("label"), ent.get("target_label"))
+    for aff in obs.affordances or []:
+        raw = aff.raw or {}
+        note(aff.target_id, raw.get("target_label"), raw.get("label"))
+    return ids, by_label
+
+
+def resolve_visible_entity(obs: Observation, raw: str) -> TargetResolution:
+    """Canonical, ambiguity-aware target resolver for entity-targeted actions.
+
+    Exact entity id wins. A unique exact label resolves. An ambiguous label is
+    an explicit error rather than a silent pick, and anything not visible in
+    this observation stays rejected.
+    """
     needle = str(raw or "").strip()
     if not needle:
-        return needle
-    if needle.startswith("entity."):
-        return needle
-    for aff in obs.affordances or []:
-        if not aff.target_id:
-            continue
-        cmd = getattr(aff, "cmd", "") or ""
-        alabel = getattr(aff, "label", "") or ""
-        tlabel = getattr(aff, "target_label", "") or (aff.raw or {}).get("target_label") or ""
-        if cmd.endswith(needle) or alabel == needle or tlabel == needle:
-            return str(aff.target_id)
-    for ent in list(obs.entities or []) + list((obs.location or {}).get("entities") or []):
-        if isinstance(ent, dict) and (ent.get("label") == needle or ent.get("target_label") == needle):
-            entity_id = ent.get("entity_id")
-            if entity_id:
-                return str(entity_id)
-    return needle
+        return TargetResolution(False, code="INVALID_PROPOSAL", message="target required")
+    ids, by_label = _visible_entity_index(obs)
+    if needle in ids:
+        return TargetResolution(True, entity_id=needle)
+    matches = by_label.get(_normalize_label(needle)) or set()
+    if len(matches) == 1:
+        return TargetResolution(True, entity_id=next(iter(matches)))
+    if len(matches) > 1:
+        return TargetResolution(
+            False,
+            code="AMBIGUOUS_TARGET",
+            message=f"{needle!r} matches more than one visible target",
+            choices=tuple(sorted(matches)),
+        )
+    if needle.startswith("entity.") and not ids:
+        # No entity view in this observation at all; leave the id for the server.
+        return TargetResolution(True, entity_id=needle)
+    return TargetResolution(False, code="INVALID_PROPOSAL", message="target not visible")
+
+
+def _require_visible_entity(obs: Observation, raw: str) -> str:
+    resolved = resolve_visible_entity(obs, raw)
+    if resolved.ok and resolved.entity_id:
+        return resolved.entity_id
+    raise NoemaActionRejected(
+        resolved.code or "INVALID_PROPOSAL",
+        resolved.message or "target not visible",
+        failure=FailureClass.INVALID_PROPOSAL,
+    )
+
+
+def _resolve_visible_entity_id(obs: Observation, raw: str) -> str:
+    resolved = resolve_visible_entity(obs, raw)
+    return resolved.entity_id if resolved.ok and resolved.entity_id else str(raw or "").strip()
 
 
 def _player_recipient(raw: str) -> str:
@@ -131,6 +222,26 @@ def advertised(obs: Observation, action: str, operation: str | None = None) -> b
     return False
 
 
+def _resolve_entity_argument(
+    obs: Observation, mapped: dict[str, Any], target: str | None
+) -> dict[str, Any]:
+    """Resolve an entity-targeted operation's target to a canonical entity id.
+
+    Non-entity operations keep the previous visible-target check so office,
+    player and agreement targets behave exactly as before.
+    """
+    op = str(mapped.get("operation") or "").upper()
+    if op in _ENTITY_TARGET_OPS:
+        raw = mapped.get("entity_id") or target
+        if raw:
+            mapped["entity_id"] = _require_visible_entity(obs, str(raw))
+        return mapped
+    vis = visible_targets(obs)
+    if target and vis and str(target) not in vis:
+        raise NoemaActionRejected("INVALID_PROPOSAL", "target not visible", failure=FailureClass.INVALID_PROPOSAL)
+    return mapped
+
+
 def validate_proposal(proposal: ActionProposal, obs: Observation, policy: ClientPolicy) -> ValidatedAction:
     action = (proposal.action or "").upper()
     if not action:
@@ -157,11 +268,7 @@ def validate_proposal(proposal: ActionProposal, obs: Observation, policy: Client
         elif action == "INSPECT":
             entity_id = args.get("entity_id") or target
             if entity_id:
-                entity_id = _resolve_visible_entity_id(obs, str(entity_id))
-            if entity_id and (obs.entities or obs.affordances) and str(entity_id) not in visible_targets(obs):
-                raise NoemaActionRejected("INVALID_PROPOSAL", "target not visible", failure=FailureClass.INVALID_PROPOSAL)
-            if entity_id:
-                args = {**args, "entity_id": entity_id}
+                args = {**args, "entity_id": _require_visible_entity(obs, str(entity_id))}
         elif action == "MESSAGE":
             recipient = args.get("recipient_id") or args.get("handle") or target
             text = args.get("text") or (args.get("message") if isinstance(args.get("message"), str) else None)
@@ -172,22 +279,18 @@ def validate_proposal(proposal: ActionProposal, obs: Observation, policy: Client
         return ValidatedAction(command=command, arguments=args, mutating=mutating)
     build_op = operation if operation in _BUILD else (action if action in _BUILD else None)
     if action == "BUILD" or build_op:
-        vis = visible_targets(obs)
-        if target and vis and str(target) not in vis:
-            raise NoemaActionRejected("INVALID_PROPOSAL", "target not visible", failure=FailureClass.INVALID_PROPOSAL)
         mapped = {**args, "operation": build_op or "CONSTRUCT"}
+        mapped = _resolve_entity_argument(obs, mapped, target)
         if target and "entity_id" not in mapped and mapped["operation"] != "CONSTRUCT":
             mapped["entity_id"] = target
         return ValidatedAction(command="BUILD", arguments=mapped, mutating=True)
     if action in _COMMIT or operation in _COMMIT:
-        vis = visible_targets(obs)
-        if target and vis and str(target) not in vis:
-            raise NoemaActionRejected("INVALID_PROPOSAL", "target not visible", failure=FailureClass.INVALID_PROPOSAL)
         op = _COMMIT.get(operation) or _COMMIT.get(action)
         if not op:
             raise NoemaActionRejected("INVALID_PROPOSAL", f"unknown action {action}", failure=FailureClass.INVALID_PROPOSAL)
         mapped = {**args, "operation": op}
         if target and "entity_id" not in mapped:
             mapped["entity_id"] = target
+        mapped = _resolve_entity_argument(obs, mapped, target)
         return ValidatedAction(command="COMMIT", arguments=mapped, mutating=True)
     raise NoemaActionRejected("INVALID_PROPOSAL", f"unknown action {action}", failure=FailureClass.INVALID_PROPOSAL)
