@@ -46,12 +46,12 @@ from noema_client.isolated import (
     is_isolated_world,
     require_isolated_admin_header,
 )
-from noema_client.observations import prepare_context, render_observation, to_observation
+from noema_client.observations import prepare_context, to_observation
 from noema_client.policy import ClientPolicy
 from noema_client.protocol import WebSocketGateway, derive_ws_url
 from noema_client.redaction import collect_secrets
 from noema_client.runner import Runner
-from noema_client.seal import command_headers, refused_play_flag, resolve_seal
+from noema_client.seal import refused_play_flag, resolve_seal
 from noema_client.session import Session
 from noema_client.telemetry import Telemetry
 from noema_client.transport import CommandTransport, HttpGateway, default_http
@@ -124,7 +124,14 @@ class NoemaClient:
         self.telemetry.record(event="discover", protocol=self.discovery.protocol, transport="http")
         return self.discovery
 
-    def connect(self, *, announce: Callable[[str], None] | None = None, force: bool = False) -> StoredCredential:
+    def connect(
+        self,
+        *,
+        announce: Callable[[str], None] | None = None,
+        force: bool = False,
+        owner_email: str | None = None,
+        auto_enter: bool = True,
+    ) -> StoredCredential:
         if refused_play_flag(self):
             raise NoemaError("SEAL", "live play flags are refused")
         if self.discovery is None:
@@ -134,6 +141,8 @@ class NoemaClient:
         if cred and cred.access_token and not force and state == "stored":
             self._bind_gateway(cred)
             self.session.connected = True
+            if auto_enter:
+                self.ensure_in_world()
             return cred
         if announce:
             if force and cred and cred.access_token:
@@ -147,7 +156,13 @@ class NoemaClient:
                 pass
             self._gateway = None
         self.session.connected = False
-        enrollment = DeviceEnrollment(self.server, runtime=self.runtime, http=self._http, announce=announce)
+        enrollment = DeviceEnrollment(
+            self.server,
+            runtime=self.runtime,
+            http=self._http,
+            announce=announce,
+            owner_email=owner_email,
+        )
         meta = enrollment.start()
         enrollment.poll_until_ready()
         token = enrollment.reveal()
@@ -170,6 +185,8 @@ class NoemaClient:
         self.session.player_id = cred.player_id
         self.session.controller_id = cred.controller_id
         self.telemetry.record(event="connect", player_id=cred.player_id, transport=self.session.transport)
+        if auto_enter:
+            self.ensure_in_world()
         return cred
 
     def _http_gateway(self, cred: StoredCredential, command_path: str, world_id: str | None, admin_token: str | None) -> HttpGateway:

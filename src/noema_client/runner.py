@@ -10,7 +10,7 @@ from typing import Any, Protocol
 
 from noema_client.actions import validate_proposal
 from noema_client.aliases import expand_proposal
-from noema_client.errors import FailureClass, NoemaActionRejected, NoemaError
+from noema_client.errors import FailureClass, NoemaActionRejected
 from noema_client.observations import prepare_context, to_observation
 from noema_client.policy import ClientPolicy
 from noema_client.types import ActionProposal, Observation, TurnResult

@@ -40,12 +40,14 @@ class StoredCredential:
 
 def _private_write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text, encoding="utf-8")
     try:
-        os.chmod(path, 0o600)
+        os.chmod(tmp, 0o600)
         os.chmod(path.parent, 0o700)
     except OSError:
         pass
+    os.replace(tmp, path)
 
 
 def credential_path(directory: Path | None = None) -> Path:

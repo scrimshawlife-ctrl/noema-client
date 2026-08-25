@@ -52,7 +52,12 @@ def cmd_connect(ns: argparse.Namespace) -> int:
         else:
             print(msg)
 
-    cred = client.connect(announce=announce, force=bool(getattr(ns, "force", False)))
+    cred = client.connect(
+        announce=announce,
+        force=bool(getattr(ns, "force", False)),
+        owner_email=getattr(ns, "email", None),
+        auto_enter=not bool(getattr(ns, "no_enter", False)),
+    )
     print()
     print("Connected.")
     print()
@@ -231,6 +236,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="re-enroll even if a stored credential looks usable",
     )
+    p_connect.add_argument("--email", default=None, help="optional owner email for one-click approval")
+    p_connect.add_argument("--no-enter", action="store_true", help="store credential without automatic ENTER_WORLD")
     p_connect.set_defaults(func=cmd_connect)
 
     p_status = sub.add_parser("status", help="connection status")
