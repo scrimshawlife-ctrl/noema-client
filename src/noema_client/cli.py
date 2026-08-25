@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from noema_client.aliases import apply_alias_command, parse_alias_command
+from noema_client.acceptance import AcceptanceError, run_materials_acceptance, validate_materials_gate
 from noema_client.client import NoemaClient
 from noema_client.config import load_aliases, save_aliases
 from noema_client.errors import NoemaActionRejected, NoemaError
@@ -127,6 +128,36 @@ def cmd_act(ns: argparse.Namespace) -> int:
 
         print(render_observation(to_observation(result.observation)))
     return 0
+
+
+def cmd_accept_materials(ns: argparse.Namespace) -> int:
+    try:
+        validate_materials_gate(
+            server=ns.server or "https://noema.guru",
+            world_id=ns.accept_world_id,
+            ack=ns.ack,
+            run_id=ns.run_id,
+        )
+        client = _client(ns)
+        if not client._credential:
+            raise AcceptanceError("CREDENTIAL_REQUIRED", "connect before production acceptance")
+        client.connect(auto_enter=False)
+        ready = client._http("GET", f"{client.server}/ready")
+        result = run_materials_acceptance(
+            client,
+            ready=ready,
+            world_id=ns.accept_world_id,
+            ack=ns.ack,
+            run_id=ns.run_id,
+            harvest_target=ns.harvest_target,
+            construct_class=ns.construct_class,
+        )
+    except AcceptanceError as exc:
+        result = {"ok": False, "code": exc.code, "message": exc.message}
+    except NoemaError as exc:
+        result = {"ok": False, "code": exc.code, "message": exc.message}
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result.get("ok") else 2
 
 
 def cmd_play(ns: argparse.Namespace) -> int:
@@ -270,6 +301,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_act.add_argument("target", nargs="?")
     p_act.add_argument("--arguments", default=None, help="JSON object")
     p_act.set_defaults(func=cmd_act)
+
+    p_accept = sub.add_parser("accept", help="explicitly gated production acceptance workflows")
+    accept_sub = p_accept.add_subparsers(dest="accept_op", required=True)
+    p_materials = accept_sub.add_parser("materials-construct", help="HARVEST → cargo → CONSTRUCT")
+    p_materials.add_argument("--world-id", dest="accept_world_id", required=True)
+    p_materials.add_argument("--ack", required=True, help="must equal MUTATE <world-id>")
+    p_materials.add_argument("--run-id", required=True, help="stable id used for safe retries")
+    p_materials.add_argument("--harvest-target", default=None)
+    p_materials.add_argument("--construct-class", default="workshop")
+    p_materials.set_defaults(func=cmd_accept_materials)
 
     p_play = sub.add_parser("play", help="bounded headless loop")
     p_play.add_argument("--max-actions", type=int, default=8)

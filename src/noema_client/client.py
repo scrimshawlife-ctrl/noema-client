@@ -331,11 +331,22 @@ class NoemaClient:
         self.session.world = self.observation.world
         return self.observation
 
-    def act(self, proposal: ActionProposal) -> CommandResult:
+    def act(
+        self,
+        proposal: ActionProposal,
+        *,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
+    ) -> CommandResult:
         obs = self.observation or to_observation({})
         proposal = expand_proposal(proposal, load_aliases(self.config_home))
         validated = validate_proposal(proposal, obs, self.policy)
-        result = self._require_gateway().send_command(validated.command, validated.arguments)
+        result = self._require_gateway().send_command(
+            validated.command,
+            validated.arguments,
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+        )
         if result.ok:
             self.observation = to_observation(
                 result.observation,
