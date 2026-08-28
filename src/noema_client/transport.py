@@ -13,8 +13,11 @@ import urllib.request
 import uuid
 from typing import Any, Callable, Protocol
 
+from noema_client._version import __version__
 from noema_client.errors import FailureClass
 from noema_client.types import CommandResult
+
+USER_AGENT = f"noema-client/{__version__} (+https://github.com/scrimshawlife-ctrl/noema-client)"
 
 
 class TokenProvider(Protocol):
@@ -59,7 +62,7 @@ def default_http(
     hdrs = {
         "content-type": "application/json",
         "accept": "application/json",
-        "user-agent": "noema-client/0.1 (+https://github.com/scrimshawlife-ctrl/noema-client)",
+        "user-agent": USER_AGENT,
     }
     if token:
         hdrs["authorization"] = f"Bearer {token}"
@@ -152,6 +155,7 @@ class HttpGateway:
         *,
         http: Callable[..., dict[str, Any]] | None = None,
         runtime: str = "noema-client",
+        client_version: str = __version__,
         command_path: str = "/v1/command",
         world_id: str | None = None,
         seal: str | None = None,
@@ -161,6 +165,7 @@ class HttpGateway:
         self._tokens = token_provider
         self._http = http or default_http
         self.runtime = runtime
+        self.client_version = client_version
         self.command_path = command_path or "/v1/command"
         if self.command_path.startswith("http"):
             self.command_url = self.command_path
@@ -198,6 +203,7 @@ class HttpGateway:
                     "client": {
                         "type": "agent",
                         "runtime": self.runtime,
+                        "client_version": self.client_version,
                         "client_action_sequence": action_seq,
                     },
                 }
