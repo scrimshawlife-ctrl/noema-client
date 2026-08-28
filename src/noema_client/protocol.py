@@ -13,6 +13,7 @@ import uuid
 from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
+from noema_client._version import __version__
 from noema_client.errors import FailureClass, NoemaProtocolError
 from noema_client.transport import classify, payload_is_resync
 from noema_client.types import CommandResult
@@ -60,6 +61,7 @@ class WebSocketGateway:
         *,
         seal: str | None = None,
         runtime: str = "noema-client",
+        client_version: str = __version__,
         resume_token: str | None = None,
         connect_factory: Callable[[str], Any] | None = None,
     ) -> None:
@@ -67,6 +69,7 @@ class WebSocketGateway:
         self._tokens = token_provider
         self.seal = seal
         self.runtime = runtime
+        self.client_version = client_version
         self.session_id: str | None = None
         self.resume_token: str | None = resume_token
         self.player_id: str | None = None
@@ -192,7 +195,12 @@ class WebSocketGateway:
             "command": verb,
             "arguments": arguments or {},
             "action": {"verb": verb, "parameters": arguments or {}},
-            "client": {"type": "agent", "runtime": self.runtime, "client_action_sequence": action_seq},
+            "client": {
+                "type": "agent",
+                "runtime": self.runtime,
+                "client_version": self.client_version,
+                "client_action_sequence": action_seq,
+            },
         }
         frame = {
             "protocol": "agent-protocol/v1",
