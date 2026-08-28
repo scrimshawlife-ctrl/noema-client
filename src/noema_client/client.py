@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
 
+from noema_client._version import __version__
 from noema_client.actions import validate_proposal
 from noema_client.aliases import (
     expand_aliases,
@@ -428,7 +429,7 @@ class NoemaClient:
             latency_ms=None,
             protocol=self.session.protocol,
             transport=self.session.transport,
-            client_version="0.1.8",
+            client_version=__version__,
         )
         return result
 

@@ -3,6 +3,8 @@
 The model proposes. The client constrains and transports. NOEMA decides.
 """
 
+from noema_client._version import __version__
+from noema_client.affordances import proposal_from_affordance
 from noema_client.client import NoemaClient
 from noema_client.errors import (
     NoemaActionRejected,
@@ -14,10 +16,8 @@ from noema_client.errors import (
     NoemaWorldIncident,
     NoemaWorldPaused,
 )
-from noema_client.affordances import proposal_from_affordance
 from noema_client.types import ActionProposal, Affordance, Observation
 
-__version__ = "0.1.12"
 __all__ = [
     "ActionProposal",
     "Affordance",
@@ -31,6 +31,6 @@ __all__ = [
     "NoemaWorldIncident",
     "NoemaWorldPaused",
     "Observation",
-    "proposal_from_affordance",
     "__version__",
+    "proposal_from_affordance",
 ]
