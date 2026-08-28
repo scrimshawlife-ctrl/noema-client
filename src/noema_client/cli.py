@@ -9,7 +9,8 @@ from pathlib import Path
 
 from noema_client._version import __version__
 from noema_client.aliases import apply_alias_command, parse_alias_command
-from noema_client.client import NoemaClient
+from noema_client.acceptance import AcceptanceError, run_materials_acceptance, validate_materials_gate
+from noema_client.client import NoemaClient, PlayBoundsError, validate_play_bounds
 from noema_client.config import load_aliases, save_aliases
 from noema_client.errors import NoemaActionRejected, NoemaError
 from noema_client.observations import render_observation
@@ -53,7 +54,12 @@ def cmd_connect(ns: argparse.Namespace) -> int:
         else:
             print(msg)
 
-    cred = client.connect(announce=announce)
+    cred = client.connect(
+        announce=announce,
+        force=bool(getattr(ns, "force", False)),
+        owner_email=getattr(ns, "email", None),
+        auto_enter=not bool(getattr(ns, "no_enter", False)),
+    )
     print()
     print("Connected.")
     print()
@@ -125,17 +131,58 @@ def cmd_act(ns: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_accept_materials(ns: argparse.Namespace) -> int:
+    try:
+        validate_materials_gate(
+            server=ns.server or "https://noema.guru",
+            world_id=ns.accept_world_id,
+            ack=ns.ack,
+            run_id=ns.run_id,
+        )
+        client = _client(ns)
+        if not client._credential:
+            raise AcceptanceError("CREDENTIAL_REQUIRED", "connect before production acceptance")
+        client.connect(auto_enter=False)
+        ready = client._http("GET", f"{client.server}/ready")
+        result = run_materials_acceptance(
+            client,
+            ready=ready,
+            world_id=ns.accept_world_id,
+            ack=ns.ack,
+            run_id=ns.run_id,
+            harvest_target=ns.harvest_target,
+            construct_class=ns.construct_class,
+        )
+    except AcceptanceError as exc:
+        result = {"ok": False, "code": exc.code, "message": exc.message}
+    except NoemaError as exc:
+        result = {"ok": False, "code": exc.code, "message": exc.message}
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result.get("ok") else 2
+
+
 def cmd_play(ns: argparse.Namespace) -> int:
+    try:
+        validate_play_bounds(
+            max_actions=ns.max_actions, duration=ns.duration, cooldown=ns.cooldown
+        )
+    except PlayBoundsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     client = _client(ns)
     if not client._credential:
         client.connect()
-    turns = client.play(max_actions=ns.max_actions, enter=not ns.no_enter)
-    ok = 0
-    for turn in turns:
-        if hasattr(turn, "ok"):
-            ok += int(bool(turn.ok))
-    print(f"play finished turns={len(turns)}")
-    return 0 if turns else 1
+    report = client.play(
+        max_actions=ns.max_actions,
+        duration=ns.duration,
+        cooldown=ns.cooldown,
+        enter=not ns.no_enter,
+    )
+    if getattr(ns, "json", False):
+        print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
+    else:
+        print(report.summary())
+    return 0 if len(report) else 1
 
 
 def cmd_doctor(ns: argparse.Namespace) -> int:
@@ -146,7 +193,8 @@ def cmd_doctor(ns: argparse.Namespace) -> int:
     else:
         for key, value in report.items():
             print(f"{key}: {value}")
-    return 0 if report.get("reachability") == "ok" else 1
+    credential_ok = report.get("credential") not in {"expired", "invalid"}
+    return 0 if report.get("reachability") == "ok" and credential_ok else 1
 
 
 def cmd_disconnect(ns: argparse.Namespace) -> int:
@@ -226,7 +274,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_connect = sub.add_parser("connect", help="device enrollment")
+    p_connect = sub.add_parser(
+        "connect",
+        help="device enrollment; prints plain code fallback",
+        description=(
+            "Enroll this Controller. With --email, NOEMA may pre-address one-click "
+            "approval for that owner, but the CLI still prints the human approval URL "
+            "and short code. By default approval automatically enters the world; use "
+            "--no-enter to only store the credential."
+        ),
+    )
+    p_connect.add_argument(
+        "--force",
+        action="store_true",
+        help="re-enroll even if a stored credential looks usable",
+    )
+    p_connect.add_argument(
+        "--email",
+        default=None,
+        help="optional owner email for one-click approval; plain code fallback still prints",
+    )
+    p_connect.add_argument(
+        "--no-enter",
+        action="store_true",
+        help="store credential without automatic ENTER_WORLD/orientation",
+    )
     p_connect.set_defaults(func=cmd_connect)
 
     p_status = sub.add_parser("status", help="connection status")
@@ -243,10 +315,36 @@ def build_parser() -> argparse.ArgumentParser:
     p_act.add_argument("--arguments", default=None, help="JSON object")
     p_act.set_defaults(func=cmd_act)
 
+    p_accept = sub.add_parser("accept", help="explicitly gated production acceptance workflows")
+    accept_sub = p_accept.add_subparsers(dest="accept_op", required=True)
+    p_materials = accept_sub.add_parser("materials-construct", help="HARVEST → cargo → CONSTRUCT")
+    p_materials.add_argument("--world-id", dest="accept_world_id", required=True)
+    p_materials.add_argument("--ack", required=True, help="must equal MUTATE <world-id>")
+    p_materials.add_argument("--run-id", required=True, help="stable id used for safe retries")
+    p_materials.add_argument("--harvest-target", default=None)
+    p_materials.add_argument("--construct-class", default="workshop")
+    p_materials.set_defaults(func=cmd_accept_materials)
+
     p_play = sub.add_parser("play", help="bounded headless loop")
-    p_play.add_argument("--max-actions", type=int, default=8)
-    p_play.add_argument("--duration", type=float, default=None)
-    p_play.add_argument("--cooldown", type=float, default=0.0)
+    p_play.add_argument(
+        "--max-actions",
+        type=int,
+        default=None,
+        help="stop after at most N actions (default 8 when no --duration is given)",
+    )
+    p_play.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="run one continuous session for up to N seconds (monotonic clock)",
+    )
+    p_play.add_argument(
+        "--cooldown",
+        type=float,
+        default=None,
+        help="seconds to pause between attempted turns (not before the first or after the last)",
+    )
+    p_play.add_argument("--json", action="store_true", help="print the stop summary as JSON")
     p_play.add_argument("--no-enter", action="store_true")
     p_play.set_defaults(func=cmd_play)
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 from noema_client.actions import validate_proposal
 from noema_client.adapters.scripted import FirstValidAffordanceAdapter
 from noema_client.aliases import proposal_from_line
-from noema_client.errors import NoemaActionRejected
 from noema_client.observations import prepare_context, to_observation
 from noema_client.policy import ClientPolicy
 from noema_client.types import ActionProposal

@@ -6,6 +6,7 @@ Adapted from Zero-State-LLC/Noema src/noema/harness/types.py.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 from noema_client.errors import FailureClass
@@ -97,3 +98,69 @@ class TurnResult:
     failure: FailureClass | None = None
     proposal: ActionProposal | None = None
     result: CommandResult | None = None
+
+
+class StopReason(str, Enum):
+    """Why an autonomous play session stopped. Always reported."""
+
+    ACTION_BOUND = "action_bound"
+    DURATION_ELAPSED = "duration_elapsed"
+    NO_PROPOSAL = "no_proposal"
+    CIRCUIT_BREAKER = "circuit_breaker"
+    AUTH_FAILURE = "auth_failure"
+    WORLD_INCIDENT = "world_incident"
+    WORLD_PAUSED = "world_paused"
+    POLICY_REJECTION = "policy_rejection"
+    VALIDATION_REJECTION = "validation_rejection"
+    SERVER_REJECTION = "server_rejection"
+    USER_INTERRUPT = "user_interrupt"
+
+
+class PlayReport(list):
+    """Turn list plus why the session ended.
+
+    Subclasses ``list`` so existing callers that index or len() the return of
+    ``play()`` keep working unchanged.
+    """
+
+    def __init__(
+        self,
+        turns: list[TurnResult] | None = None,
+        *,
+        stop_reason: StopReason | None = None,
+        attempted: int = 0,
+        succeeded: int = 0,
+        rejected: int = 0,
+        elapsed_seconds: float = 0.0,
+        detail: str | None = None,
+    ) -> None:
+        super().__init__(turns or [])
+        self.stop_reason = stop_reason
+        self.attempted = attempted
+        self.succeeded = succeeded
+        self.rejected = rejected
+        self.elapsed_seconds = elapsed_seconds
+        self.detail = detail
+
+    @property
+    def reason_text(self) -> str:
+        base = self.stop_reason.value if self.stop_reason else "unknown"
+        return f"{base}: {self.detail}" if self.detail else base
+
+    def summary(self) -> str:
+        return (
+            f"play finished turns={len(self)} attempted={self.attempted} "
+            f"ok={self.succeeded} rejected={self.rejected} "
+            f"elapsed={self.elapsed_seconds:.1f}s stop={self.reason_text}"
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "turns": len(self),
+            "attempted": self.attempted,
+            "succeeded": self.succeeded,
+            "rejected": self.rejected,
+            "elapsed_seconds": round(self.elapsed_seconds, 3),
+            "stop_reason": self.stop_reason.value if self.stop_reason else None,
+            "detail": self.detail,
+        }

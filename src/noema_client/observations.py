@@ -67,9 +67,18 @@ def to_observation(
     )
 
 
-def prepare_context(obs: Observation, memory: list[dict[str, Any]], policy: ClientPolicy) -> dict[str, Any]:
+def prepare_context(
+    obs: Observation,
+    memory: list[dict[str, Any]],
+    policy: ClientPolicy,
+    *,
+    avoid: dict[str, str] | None = None,
+) -> dict[str, Any]:
     return {
         "system": {
+            # Action fingerprints that just failed deterministically. An adapter
+            # should not propose these again against this observation.
+            "avoid": dict(avoid or {}),
             "role": "client_policy",
             "pacing": policy.pacing_mode,
             "permits": {
@@ -116,6 +125,17 @@ def prepare_context(obs: Observation, memory: list[dict[str, Any]], policy: Clie
     }
 
 
+def _labelled(data: dict[str, Any], labels: dict[str, str]) -> list[str]:
+    """Known keys in label order, then anything the server added since.
+
+    The gap this renders was a field arriving parsed and never being shown, so an
+    unrecognized key is printed rather than dropped.
+    """
+    parts = [f"{label} {data[key]}" for key, label in labels.items() if data.get(key) is not None]
+    parts += [f"{key} {value}" for key, value in data.items() if key not in labels and value is not None]
+    return parts
+
+
 def render_observation(obs: Observation) -> str:
     loc = obs.location or {}
     name = loc.get("name") or "?"
@@ -134,6 +154,19 @@ def render_observation(obs: Observation) -> str:
         lines.append(f"Lore: {len(obs.lore_attractors)}")
     if obs.protocol_strength is not None:
         lines.append(f"Protocol: {obs.protocol_strength}")
+    reputation = _labelled(obs.reputation_summary or {}, {
+        "self_image": "image",
+        "self_second_order": "second-order",
+    })
+    if reputation:
+        lines.append("Reputation: " + ", ".join(reputation))
+    norms = _labelled(obs.active_norms or {}, {
+        "org_create_influence": "ORG_CREATE influence",
+        "harvest_pressure": "harvest pressure",
+        "last_ratchet": "last ratchet",
+    })
+    if norms:
+        lines.append("Norms: " + ", ".join(norms))
     hinted = [a.hint for a in obs.affordances if a.hint]
     if hinted:
         lines.append("Hints: " + "; ".join(hinted[:4]))

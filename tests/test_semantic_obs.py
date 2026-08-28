@@ -36,6 +36,46 @@ def test_to_observation_forwards_semantic_and_deep_time_fields():
     assert "Scars: 1" in text
     assert "Protocol: 2" in text
     assert "Hints: compact grounded signal preferred" in text
+    assert "Reputation: image 0, second-order 0" in text
+    assert "Norms: ORG_CREATE influence 5, harvest pressure 3" in text
+
+
+def test_render_observation_shows_reputation_and_norms():
+    obs = to_observation(
+        {
+            "world_name": "Perihelion Reach",
+            "location": {"name": "Civic Exchange"},
+            "reputation_summary": {"self_image": 4, "self_second_order": 2},
+            "active_norms": {
+                "org_create_influence": 7,
+                "harvest_pressure": 0.25,
+                "last_ratchet": "norm_ratchet",
+            },
+        }
+    )
+    text = render_observation(obs)
+    assert "Reputation: image 4, second-order 2" in text
+    assert "Norms: ORG_CREATE influence 7, harvest pressure 0.25, last ratchet norm_ratchet" in text
+
+
+def test_render_observation_omits_reputation_and_norms_when_absent():
+    text = render_observation(to_observation({"world_name": "Perihelion Reach"}))
+    assert "Reputation:" not in text
+    assert "Norms:" not in text
+
+
+def test_render_observation_omits_empty_and_keeps_unknown_norm_keys():
+    text = render_observation(
+        to_observation(
+            {
+                "world_name": "Perihelion Reach",
+                "reputation_summary": {},
+                "active_norms": {"org_create_influence": 5, "some_new_norm": "held"},
+            }
+        )
+    )
+    assert "Reputation:" not in text
+    assert "Norms: ORG_CREATE influence 5, some_new_norm held" in text
 
 
 def test_parse_affordances_keeps_hint_off_arguments():

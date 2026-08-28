@@ -5,7 +5,9 @@ The model proposes. The client constrains and transports. NOEMA decides.
 
 from __future__ import annotations
 
+import math
 import os
+import time
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -20,7 +22,7 @@ from noema_client.aliases import (
     should_stop_macro,
 )
 from noema_client.adapters.scripted import FirstValidAffordanceAdapter
-from noema_client.auth import DeviceEnrollment, StaticTokenProvider
+from noema_client.auth import DeviceEnrollment, StaticTokenProvider, credential_state
 from noema_client.config import (
     DEFAULT_SERVER,
     StoredCredential,
@@ -47,16 +49,79 @@ from noema_client.isolated import (
     is_isolated_world,
     require_isolated_admin_header,
 )
-from noema_client.observations import prepare_context, render_observation, to_observation
+from noema_client.observations import prepare_context, to_observation
 from noema_client.policy import ClientPolicy
 from noema_client.protocol import WebSocketGateway, derive_ws_url
 from noema_client.redaction import collect_secrets
 from noema_client.runner import Runner
-from noema_client.seal import command_headers, refused_play_flag, resolve_seal
+from noema_client.seal import refused_play_flag, resolve_seal
 from noema_client.session import Session
 from noema_client.telemetry import Telemetry
 from noema_client.transport import CommandTransport, HttpGateway, default_http
-from noema_client.types import ActionProposal, CommandResult, Observation
+from noema_client.types import (
+    ActionProposal,
+    CommandResult,
+    Observation,
+    PlayReport,
+    StopReason,
+    TurnResult,
+)
+
+
+
+class PlayBoundsError(ValueError):
+    """A duration / cooldown / max-actions value that cannot bound a session."""
+
+
+def _finite(value: float) -> bool:
+    return not (math.isnan(value) or math.isinf(value))
+
+
+def validate_play_bounds(
+    *,
+    max_actions: int | None = None,
+    duration: float | None = None,
+    cooldown: float | None = None,
+) -> None:
+    """Reject bounds that would make a session unbounded or meaningless."""
+    if max_actions is not None:
+        if not isinstance(max_actions, int) or isinstance(max_actions, bool):
+            raise PlayBoundsError("--max-actions must be a whole number")
+        if max_actions < 1:
+            raise PlayBoundsError("--max-actions must be at least 1")
+    if duration is not None:
+        value = float(duration)
+        if not _finite(value):
+            raise PlayBoundsError("--duration must be a finite number of seconds")
+        if value <= 0:
+            raise PlayBoundsError("--duration must be greater than 0 seconds")
+    if cooldown is not None:
+        value = float(cooldown)
+        if not _finite(value):
+            raise PlayBoundsError("--cooldown must be a finite number of seconds")
+        if value < 0:
+            raise PlayBoundsError("--cooldown cannot be negative")
+
+
+def _classify_stop(turn: TurnResult, runner: Runner) -> tuple[StopReason, str | None]:
+    """Name why the loop stopped, distinguishing deterministic from transient."""
+    failure = turn.failure
+    if failure == FailureClass.AUTH_REQUIRED or turn.reason == "auth_failure":
+        return StopReason.AUTH_FAILURE, turn.reason
+    if failure == FailureClass.WORLD_PAUSED or turn.reason == "WORLD_PAUSED":
+        return StopReason.WORLD_PAUSED, turn.reason
+    if failure == FailureClass.WORLD_INCIDENT or turn.reason == "WORLD_INCIDENT":
+        return StopReason.WORLD_INCIDENT, turn.reason
+    if turn.reason == "no_proposal":
+        return StopReason.NO_PROPOSAL, None
+    code = turn.reason or runner.last_stop_detail
+    if code == "POLICY_DENIED":
+        return StopReason.POLICY_REJECTION, code
+    if code in {"INVALID_PROPOSAL", "AMBIGUOUS_TARGET"}:
+        return StopReason.VALIDATION_REJECTION, code
+    if runner.breaker.tripped:
+        return StopReason.CIRCUIT_BREAKER, code
+    return StopReason.SERVER_REJECTION, code
 
 
 class NoemaClient:
@@ -125,17 +190,45 @@ class NoemaClient:
         self.telemetry.record(event="discover", protocol=self.discovery.protocol, transport="http")
         return self.discovery
 
-    def connect(self, *, announce: Callable[[str], None] | None = None) -> StoredCredential:
+    def connect(
+        self,
+        *,
+        announce: Callable[[str], None] | None = None,
+        force: bool = False,
+        owner_email: str | None = None,
+        auto_enter: bool = True,
+    ) -> StoredCredential:
         if refused_play_flag(self):
             raise NoemaError("SEAL", "live play flags are refused")
         if self.discovery is None:
             self.discover()
         cred = self._credential
-        if cred and cred.access_token:
+        state = credential_state(cred.access_token if cred else None)
+        if cred and cred.access_token and not force and state == "stored":
             self._bind_gateway(cred)
             self.session.connected = True
+            if auto_enter:
+                self.ensure_in_world()
             return cred
-        enrollment = DeviceEnrollment(self.server, runtime=self.runtime, http=self._http, announce=announce)
+        if announce:
+            if force and cred and cred.access_token:
+                announce("Forcing re-enrollment.")
+            elif state in {"expired", "invalid"}:
+                announce(f"Stored credential is {state}. Starting device enrollment.")
+        if self._gateway is not None:
+            try:
+                self._gateway.close()
+            except Exception:
+                pass
+            self._gateway = None
+        self.session.connected = False
+        enrollment = DeviceEnrollment(
+            self.server,
+            runtime=self.runtime,
+            http=self._http,
+            announce=announce,
+            owner_email=owner_email,
+        )
         meta = enrollment.start()
         enrollment.poll_until_ready()
         token = enrollment.reveal()
@@ -158,6 +251,8 @@ class NoemaClient:
         self.session.player_id = cred.player_id
         self.session.controller_id = cred.controller_id
         self.telemetry.record(event="connect", player_id=cred.player_id, transport=self.session.transport)
+        if auto_enter:
+            self.ensure_in_world()
         return cred
 
     def _http_gateway(self, cred: StoredCredential, command_path: str, world_id: str | None, admin_token: str | None) -> HttpGateway:
@@ -243,6 +338,13 @@ class NoemaClient:
             cred = self._credential or load_credential(self.config_home)
             if not cred:
                 raise NoemaAuthError("AUTH_REQUIRED", "not connected")
+            state = credential_state(cred.access_token)
+            if state in {"expired", "invalid"}:
+                raise NoemaAuthError(
+                    "NOT_AUTHORIZED",
+                    f"stored credential is {state}; run noema connect",
+                    failure=FailureClass.AUTH_REQUIRED,
+                )
             self._credential = cred
             if self.discovery is None:
                 self.discover()
@@ -295,11 +397,22 @@ class NoemaClient:
         self.session.world = self.observation.world
         return self.observation
 
-    def act(self, proposal: ActionProposal) -> CommandResult:
+    def act(
+        self,
+        proposal: ActionProposal,
+        *,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
+    ) -> CommandResult:
         obs = self.observation or to_observation({})
         proposal = expand_proposal(proposal, load_aliases(self.config_home))
         validated = validate_proposal(proposal, obs, self.policy)
-        result = self._require_gateway().send_command(validated.command, validated.arguments)
+        result = self._require_gateway().send_command(
+            validated.command,
+            validated.arguments,
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+        )
         if result.ok:
             self.observation = to_observation(
                 result.observation,
@@ -361,7 +474,23 @@ class NoemaClient:
             request_id="",
         )
 
-    def play(self, *, max_actions: int | None = None, adapter: Any | None = None, enter: bool = True) -> list:
+    def play(
+        self,
+        *,
+        max_actions: int | None = None,
+        duration: float | None = None,
+        cooldown: float | None = None,
+        adapter: Any | None = None,
+        enter: bool = True,
+    ) -> PlayReport:
+        """Run one bounded autonomous session and report why it stopped.
+
+        With neither bound given, the safe default action bound applies. A
+        duration alone runs until the clock expires; supplying both stops at
+        whichever limit is reached first. Elapsed time is measured on a
+        monotonic clock so a wall-clock change cannot end or extend a session.
+        """
+        validate_play_bounds(max_actions=max_actions, duration=duration, cooldown=cooldown)
         gw = self._require_gateway()
         runner = Runner(
             gw,
@@ -369,26 +498,68 @@ class NoemaClient:
             self.policy,
             aliases=load_aliases(self.config_home),
         )
-        turns = []
-        if enter:
-            turns.append(self.act(ActionProposal(action="ENTER_WORLD")))
-        self.observe()
-        runner.observation = self.observation
-        bound = max_actions if max_actions is not None else self.policy.max_actions
-        for _ in range(bound):
-            turn = runner.turn()
-            turns.append(turn)
-            self.observation = runner.observation
-            if turn.stopped:
-                break
-        return turns
+        if max_actions is None and duration is None:
+            action_bound: int | None = self.policy.max_actions
+        else:
+            action_bound = max_actions
+        pause = cooldown if cooldown is not None else self.policy.cooldown_seconds
+
+        turns: list[TurnResult] = []
+        attempted = succeeded = rejected = 0
+        stop: StopReason | None = None
+        detail: str | None = None
+        start = time.monotonic()
+
+        def elapsed() -> float:
+            return time.monotonic() - start
+
+        try:
+            if enter:
+                turns.append(self.act(ActionProposal(action="ENTER_WORLD")))
+            self.observe()
+            runner.observation = self.observation
+            while True:
+                if action_bound is not None and attempted >= action_bound:
+                    stop = StopReason.ACTION_BOUND
+                    break
+                if duration is not None and elapsed() >= duration:
+                    stop = StopReason.DURATION_ELAPSED
+                    break
+                if attempted and pause > 0:
+                    time.sleep(pause)
+                    if duration is not None and elapsed() >= duration:
+                        stop = StopReason.DURATION_ELAPSED
+                        break
+                turn = runner.turn()
+                turns.append(turn)
+                attempted += 1
+                self.observation = runner.observation
+                if turn.ok:
+                    succeeded += 1
+                else:
+                    rejected += 1
+                if turn.stopped:
+                    stop, detail = _classify_stop(turn, runner)
+                    break
+        except KeyboardInterrupt:
+            stop = StopReason.USER_INTERRUPT
+        return PlayReport(
+            turns,
+            stop_reason=stop,
+            attempted=attempted,
+            succeeded=succeeded,
+            rejected=rejected,
+            elapsed_seconds=elapsed(),
+            detail=detail,
+        )
 
     def status(self) -> dict[str, Any]:
         cred = self._credential
+        state = credential_state(cred.access_token if cred else None)
         blocked = self.policy.blocked_advertised(self.observation) if self.observation else []
         return {
             "server": self.server,
-            "connected": self.session.connected or bool(cred),
+            "connected": state == "stored",
             "protocol": self.session.protocol,
             "world": self.session.world,
             "world_id": self.world_id,
@@ -398,7 +569,7 @@ class NoemaClient:
             "controller_type": "agent",
             "transport": self.session.transport,
             "seal": "sent" if self.session.seal_sent or self.seal else "none",
-            "credential": "stored" if cred else "missing",
+            "credential": state,
             "admin_header": "present" if self._admin_token else "missing",
             "resume": self.session.resume,
             "cycle": self.session.cycle,
@@ -407,10 +578,11 @@ class NoemaClient:
         }
 
     def doctor(self) -> dict[str, Any]:
+        cred = self._credential or load_credential(self.config_home)
         report: dict[str, Any] = {
             "config_dir": str(self.config_home),
             "config_dir_mode": _mode(self.config_home),
-            "credential": "present" if load_credential(self.config_home) else "missing",
+            "credential": credential_state(cred.access_token if cred else None),
             "server": self.server,
         }
         try:

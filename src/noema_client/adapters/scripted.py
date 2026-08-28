@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from noema_client.affordances import proposal_from_affordance
+from noema_client.runner import affordance_signature, proposal_fingerprint
 from noema_client.types import ActionProposal
 
 _DIRECTIONS = ("north", "south", "east", "west", "up", "down", "in", "out")
@@ -135,7 +136,9 @@ class FirstValidAffordanceAdapter:
 
     def decide(self, context: dict[str, Any]) -> ActionProposal | None:
         canonical = context.get("canonical") or {}
-        policy = (context.get("system") or {}).get("permits") or {}
+        system = context.get("system") or {}
+        policy = system.get("permits") or {}
+        avoid = dict(system.get("avoid") or {})
         budgets = canonical.get("resources") or canonical.get("budgets") or {}
         attn = budgets.get("attention")
         if harvest_hold_full(canonical):
@@ -157,6 +160,12 @@ class FirstValidAffordanceAdapter:
             proposal = proposal_from_affordance(aff)
             if proposal is None:
                 continue
+            if avoid:
+                fingerprint = proposal_fingerprint(proposal)
+                if fingerprint in avoid and avoid[fingerprint] == affordance_signature(aff):
+                    # Failed before and the server still advertises it
+                    # identically, so it would fail the same way again.
+                    continue
             if action == "MOVE" or proposal.action == "MOVE":
                 direction = move_direction(aff) or proposal.arguments.get("direction")
                 if not direction:
