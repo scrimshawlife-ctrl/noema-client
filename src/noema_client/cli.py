@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+from noema_client._version import __version__
 from noema_client.aliases import apply_alias_command, parse_alias_command
 from noema_client.client import NoemaClient
 from noema_client.config import load_aliases, save_aliases
@@ -209,6 +210,7 @@ def cmd_do(ns: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="noema", description="Official NOEMA Controller client")
+    parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--server", default=None, help="NOEMA origin (default https://noema.guru or NOEMA_SERVER)")
     parser.add_argument("--config-dir", default=None)
     parser.add_argument("--transport", choices=["auto", "http", "websocket"], default="auto")
