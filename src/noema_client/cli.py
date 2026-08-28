@@ -9,7 +9,7 @@ from pathlib import Path
 
 from noema_client.aliases import apply_alias_command, parse_alias_command
 from noema_client.acceptance import AcceptanceError, run_materials_acceptance, validate_materials_gate
-from noema_client.client import NoemaClient
+from noema_client.client import NoemaClient, PlayBoundsError, validate_play_bounds
 from noema_client.config import load_aliases, save_aliases
 from noema_client.errors import NoemaActionRejected, NoemaError
 from noema_client.observations import render_observation
@@ -161,16 +161,27 @@ def cmd_accept_materials(ns: argparse.Namespace) -> int:
 
 
 def cmd_play(ns: argparse.Namespace) -> int:
+    try:
+        validate_play_bounds(
+            max_actions=ns.max_actions, duration=ns.duration, cooldown=ns.cooldown
+        )
+    except PlayBoundsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     client = _client(ns)
     if not client._credential:
         client.connect()
-    turns = client.play(max_actions=ns.max_actions, enter=not ns.no_enter)
-    ok = 0
-    for turn in turns:
-        if hasattr(turn, "ok"):
-            ok += int(bool(turn.ok))
-    print(f"play finished turns={len(turns)}")
-    return 0 if turns else 1
+    report = client.play(
+        max_actions=ns.max_actions,
+        duration=ns.duration,
+        cooldown=ns.cooldown,
+        enter=not ns.no_enter,
+    )
+    if getattr(ns, "json", False):
+        print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
+    else:
+        print(report.summary())
+    return 0 if len(report) else 1
 
 
 def cmd_doctor(ns: argparse.Namespace) -> int:
@@ -313,9 +324,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_materials.set_defaults(func=cmd_accept_materials)
 
     p_play = sub.add_parser("play", help="bounded headless loop")
-    p_play.add_argument("--max-actions", type=int, default=8)
-    p_play.add_argument("--duration", type=float, default=None)
-    p_play.add_argument("--cooldown", type=float, default=0.0)
+    p_play.add_argument(
+        "--max-actions",
+        type=int,
+        default=None,
+        help="stop after at most N actions (default 8 when no --duration is given)",
+    )
+    p_play.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="run one continuous session for up to N seconds (monotonic clock)",
+    )
+    p_play.add_argument(
+        "--cooldown",
+        type=float,
+        default=None,
+        help="seconds to pause between attempted turns (not before the first or after the last)",
+    )
+    p_play.add_argument("--json", action="store_true", help="print the stop summary as JSON")
     p_play.add_argument("--no-enter", action="store_true")
     p_play.set_defaults(func=cmd_play)
 

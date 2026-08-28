@@ -67,6 +67,10 @@ _VERBS: dict[str, tuple[str, str | None]] = {
     "x": ("INSPECT", "entity_id"),
     "repair": ("REPAIR", "entity_id"),
     "harvest": ("HARVEST", "entity_id"),
+    "dismantle": ("DISMANTLE", "entity_id"),
+    "upgrade": ("UPGRADE", "entity_id"),
+    "repurpose": ("REPURPOSE", "entity_id"),
+    "restore": ("RESTORE", "entity_id"),
     "trade": ("TRADE", None),
     "message": ("MESSAGE", None),
     "msg": ("MESSAGE", None),
@@ -245,10 +249,26 @@ def proposal_from_line(line: str) -> ActionProposal | None:
         if requested:
             arguments["requested"] = requested
         return ActionProposal(action=action, target_id=arguments["counterparty_id"], arguments=arguments)
+    if arg_key == "entity_id":
+        # Mirror the Worker's own text adapter: the label is every remaining
+        # token, so multi-word labels survive, and HARVEST takes a trailing
+        # integer amount. Keeping these aligned is what lets an advertised
+        # affordance cmd round-trip into the same canonical action.
+        label_parts = list(rest)
+        if action == "REPAIR" and label_parts and label_parts[-1].lower() == "overhaul":
+            arguments["extent"] = "overhaul"
+            label_parts = label_parts[:-1]
+        if action == "HARVEST" and len(label_parts) >= 2 and re.fullmatch(r"\d+", label_parts[-1]):
+            arguments["amount"] = int(label_parts[-1])
+            label_parts = label_parts[:-1]
+        label = " ".join(label_parts).strip().strip('"\'')
+        if not label:
+            return ActionProposal(action=action, target_id=None, arguments=arguments)
+        arguments["entity_id"] = label
+        return ActionProposal(action=action, target_id=label, arguments=arguments)
     if arg_key and target:
         arguments[arg_key] = target
-    target_id = target if arg_key == "entity_id" else None
-    return ActionProposal(action=action, target_id=target_id, arguments=arguments)
+    return ActionProposal(action=action, target_id=None, arguments=arguments)
 
 
 def expand_proposal(proposal: ActionProposal, aliases: dict[str, str]) -> ActionProposal:

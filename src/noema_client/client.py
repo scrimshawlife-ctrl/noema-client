@@ -5,7 +5,9 @@ The model proposes. The client constrains and transports. NOEMA decides.
 
 from __future__ import annotations
 
+import math
 import os
+import time
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -55,7 +57,70 @@ from noema_client.seal import refused_play_flag, resolve_seal
 from noema_client.session import Session
 from noema_client.telemetry import Telemetry
 from noema_client.transport import CommandTransport, HttpGateway, default_http
-from noema_client.types import ActionProposal, CommandResult, Observation
+from noema_client.types import (
+    ActionProposal,
+    CommandResult,
+    Observation,
+    PlayReport,
+    StopReason,
+    TurnResult,
+)
+
+
+
+class PlayBoundsError(ValueError):
+    """A duration / cooldown / max-actions value that cannot bound a session."""
+
+
+def _finite(value: float) -> bool:
+    return not (math.isnan(value) or math.isinf(value))
+
+
+def validate_play_bounds(
+    *,
+    max_actions: int | None = None,
+    duration: float | None = None,
+    cooldown: float | None = None,
+) -> None:
+    """Reject bounds that would make a session unbounded or meaningless."""
+    if max_actions is not None:
+        if not isinstance(max_actions, int) or isinstance(max_actions, bool):
+            raise PlayBoundsError("--max-actions must be a whole number")
+        if max_actions < 1:
+            raise PlayBoundsError("--max-actions must be at least 1")
+    if duration is not None:
+        value = float(duration)
+        if not _finite(value):
+            raise PlayBoundsError("--duration must be a finite number of seconds")
+        if value <= 0:
+            raise PlayBoundsError("--duration must be greater than 0 seconds")
+    if cooldown is not None:
+        value = float(cooldown)
+        if not _finite(value):
+            raise PlayBoundsError("--cooldown must be a finite number of seconds")
+        if value < 0:
+            raise PlayBoundsError("--cooldown cannot be negative")
+
+
+def _classify_stop(turn: TurnResult, runner: Runner) -> tuple[StopReason, str | None]:
+    """Name why the loop stopped, distinguishing deterministic from transient."""
+    failure = turn.failure
+    if failure == FailureClass.AUTH_REQUIRED or turn.reason == "auth_failure":
+        return StopReason.AUTH_FAILURE, turn.reason
+    if failure == FailureClass.WORLD_PAUSED or turn.reason == "WORLD_PAUSED":
+        return StopReason.WORLD_PAUSED, turn.reason
+    if failure == FailureClass.WORLD_INCIDENT or turn.reason == "WORLD_INCIDENT":
+        return StopReason.WORLD_INCIDENT, turn.reason
+    if turn.reason == "no_proposal":
+        return StopReason.NO_PROPOSAL, None
+    code = turn.reason or runner.last_stop_detail
+    if code == "POLICY_DENIED":
+        return StopReason.POLICY_REJECTION, code
+    if code in {"INVALID_PROPOSAL", "AMBIGUOUS_TARGET"}:
+        return StopReason.VALIDATION_REJECTION, code
+    if runner.breaker.tripped:
+        return StopReason.CIRCUIT_BREAKER, code
+    return StopReason.SERVER_REJECTION, code
 
 
 class NoemaClient:
@@ -408,7 +473,23 @@ class NoemaClient:
             request_id="",
         )
 
-    def play(self, *, max_actions: int | None = None, adapter: Any | None = None, enter: bool = True) -> list:
+    def play(
+        self,
+        *,
+        max_actions: int | None = None,
+        duration: float | None = None,
+        cooldown: float | None = None,
+        adapter: Any | None = None,
+        enter: bool = True,
+    ) -> PlayReport:
+        """Run one bounded autonomous session and report why it stopped.
+
+        With neither bound given, the safe default action bound applies. A
+        duration alone runs until the clock expires; supplying both stops at
+        whichever limit is reached first. Elapsed time is measured on a
+        monotonic clock so a wall-clock change cannot end or extend a session.
+        """
+        validate_play_bounds(max_actions=max_actions, duration=duration, cooldown=cooldown)
         gw = self._require_gateway()
         runner = Runner(
             gw,
@@ -416,19 +497,60 @@ class NoemaClient:
             self.policy,
             aliases=load_aliases(self.config_home),
         )
-        turns = []
-        if enter:
-            turns.append(self.act(ActionProposal(action="ENTER_WORLD")))
-        self.observe()
-        runner.observation = self.observation
-        bound = max_actions if max_actions is not None else self.policy.max_actions
-        for _ in range(bound):
-            turn = runner.turn()
-            turns.append(turn)
-            self.observation = runner.observation
-            if turn.stopped:
-                break
-        return turns
+        if max_actions is None and duration is None:
+            action_bound: int | None = self.policy.max_actions
+        else:
+            action_bound = max_actions
+        pause = cooldown if cooldown is not None else self.policy.cooldown_seconds
+
+        turns: list[TurnResult] = []
+        attempted = succeeded = rejected = 0
+        stop: StopReason | None = None
+        detail: str | None = None
+        start = time.monotonic()
+
+        def elapsed() -> float:
+            return time.monotonic() - start
+
+        try:
+            if enter:
+                turns.append(self.act(ActionProposal(action="ENTER_WORLD")))
+            self.observe()
+            runner.observation = self.observation
+            while True:
+                if action_bound is not None and attempted >= action_bound:
+                    stop = StopReason.ACTION_BOUND
+                    break
+                if duration is not None and elapsed() >= duration:
+                    stop = StopReason.DURATION_ELAPSED
+                    break
+                if attempted and pause > 0:
+                    time.sleep(pause)
+                    if duration is not None and elapsed() >= duration:
+                        stop = StopReason.DURATION_ELAPSED
+                        break
+                turn = runner.turn()
+                turns.append(turn)
+                attempted += 1
+                self.observation = runner.observation
+                if turn.ok:
+                    succeeded += 1
+                else:
+                    rejected += 1
+                if turn.stopped:
+                    stop, detail = _classify_stop(turn, runner)
+                    break
+        except KeyboardInterrupt:
+            stop = StopReason.USER_INTERRUPT
+        return PlayReport(
+            turns,
+            stop_reason=stop,
+            attempted=attempted,
+            succeeded=succeeded,
+            rejected=rejected,
+            elapsed_seconds=elapsed(),
+            detail=detail,
+        )
 
     def status(self) -> dict[str, Any]:
         cred = self._credential

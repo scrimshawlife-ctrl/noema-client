@@ -67,9 +67,18 @@ def to_observation(
     )
 
 
-def prepare_context(obs: Observation, memory: list[dict[str, Any]], policy: ClientPolicy) -> dict[str, Any]:
+def prepare_context(
+    obs: Observation,
+    memory: list[dict[str, Any]],
+    policy: ClientPolicy,
+    *,
+    avoid: dict[str, str] | None = None,
+) -> dict[str, Any]:
     return {
         "system": {
+            # Action fingerprints that just failed deterministically. An adapter
+            # should not propose these again against this observation.
+            "avoid": dict(avoid or {}),
             "role": "client_policy",
             "pacing": policy.pacing_mode,
             "permits": {

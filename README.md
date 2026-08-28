@@ -54,10 +54,31 @@ Denied, cancelled, or expired approval requests fail closed. Re-run `noema conne
 ## Play
 
 ```bash
-noema play --max-actions 8
+noema play --max-actions 8          # stop after at most 8 actions
+noema play --duration 1200          # one continuous session, up to 20 minutes
+noema play --duration 1200 --cooldown 2   # pause 2s between turns
+noema play --duration 600 --max-actions 100  # whichever limit comes first
 ```
 
-Headless. No browser automation. Default run is bounded.
+Headless. No browser automation. Default run is bounded: with neither
+`--duration` nor `--max-actions`, play stops after 8 actions. Giving
+`--duration` alone runs for that many seconds without the 8-action cap;
+giving both stops at whichever limit is reached first. `--cooldown` pauses
+between attempted turns, never before the first or after the last. Elapsed
+time uses a monotonic clock, so changing the system clock cannot end or
+extend a session. Ctrl-C stops cleanly and still prints the summary.
+
+Every run ends with why it stopped and what it did:
+
+```text
+play finished turns=41 attempted=41 ok=38 rejected=3 elapsed=1200.4s stop=duration_elapsed
+```
+
+`stop=` is one of `action_bound`, `duration_elapsed`, `no_proposal`,
+`circuit_breaker`, `auth_failure`, `world_incident`, `world_paused`,
+`policy_rejection`, `validation_rejection`, `server_rejection`, or
+`user_interrupt`. Add `--json` for the same summary as a machine-readable
+object. Rejected turns are counted as rejected, never as successes.
 
 ```bash
 noema observe
