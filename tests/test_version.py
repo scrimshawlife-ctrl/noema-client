@@ -68,7 +68,9 @@ def test_websocket_protocol_client_version_uses_authoritative_version():
 def test_action_receipt_uses_runtime_package_version(monkeypatch):
     client = NoemaClient.__new__(NoemaClient)
     receipts = []
-    client.telemetry = type("Telemetry", (), {"record": lambda self, **fields: receipts.append(fields) or fields})()
+    client.telemetry = type(
+        "Telemetry", (), {"record": lambda self, **fields: receipts.append(fields) or fields}
+    )()
     client.observation = Observation()
     client.policy = object()
     client.config_home = None
@@ -77,14 +79,18 @@ def test_action_receipt_uses_runtime_package_version(monkeypatch):
         "Gateway",
         (),
         {
-            "send_command": lambda self, command, arguments=None, *, idempotency_key=None, request_id=None, retries=1: CommandResult(
-                True, {}, None, True, 200, None, "i", "r"
+            "send_command": lambda self, command, arguments=None, *, idempotency_key=None, request_id=None, retries=1: (
+                CommandResult(True, {}, None, True, 200, None, "i", "r")
             )
         },
     )()
-    monkeypatch.setattr(client_module, "validate_proposal", lambda proposal, _obs, _policy: type(
-        "Validated", (), {"command": proposal.action, "arguments": proposal.arguments}
-    )())
+    monkeypatch.setattr(
+        client_module,
+        "validate_proposal",
+        lambda proposal, _obs, _policy: type(
+            "Validated", (), {"command": proposal.action, "arguments": proposal.arguments}
+        )(),
+    )
 
     client.act(ActionProposal("LOOK"))
     assert receipts[-1]["client_version"] == __version__
