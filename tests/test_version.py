@@ -34,7 +34,13 @@ def test_action_receipt_uses_runtime_package_version(monkeypatch):
     client.config_home = None
     client.session = type("Session", (), {"protocol": "agent-protocol/v1", "transport": "http"})()
     client._require_gateway = lambda: type(
-        "Gateway", (), {"send_command": lambda self, *_args: CommandResult(True, {}, None, True, 200, None, "i", "r")}
+        "Gateway",
+        (),
+        {
+            "send_command": lambda self, command, arguments=None, *, idempotency_key=None, request_id=None, retries=1: CommandResult(
+                True, {}, None, True, 200, None, "i", "r"
+            )
+        },
     )()
     monkeypatch.setattr(client_module, "validate_proposal", lambda proposal, _obs, _policy: type(
         "Validated", (), {"command": proposal.action, "arguments": proposal.arguments}
