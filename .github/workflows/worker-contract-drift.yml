@@ -1,0 +1,49 @@
+name: worker-contract-drift
+
+# The suite checks this client against tests/fixtures/worker_affordance_cmds.json.
+# Nothing checked that fixture against the Worker, so a command added or renamed
+# in Noema would drift silently while CI stayed green.
+#
+# Trigger shape mirrors Noema's pin-currency monitor: a scheduled drift watch,
+# plus a narrow pull_request trigger that only fires when the pinned contract or
+# the parser that consumes it changes. A normal PR is not failed because another
+# repository moved.
+on:
+  pull_request:
+    paths:
+      - "tests/fixtures/worker_affordance_cmds.json"
+      - "src/noema_client/aliases.py"
+      - "src/noema_client/actions.py"
+      - "scripts/check_worker_contract.py"
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-contract-drift
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out Noema
+        # Public repo, no token needed. Blobless keeps it small; only
+        # workers/noema/src/actions.ts is read.
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none --depth 1 \
+            https://github.com/Zero-State-LLC/Noema.git "${RUNNER_TEMP}/noema"
+          echo "Noema at $(git -C "${RUNNER_TEMP}/noema" rev-parse --short HEAD)"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compare the pinned Worker commands against the Worker
+        run: python scripts/check_worker_contract.py --noema "${RUNNER_TEMP}/noema"
