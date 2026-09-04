@@ -15,10 +15,25 @@ scrimshawlife-ctrl/noema-client     ← you are here (Controller client)
 | Need | Authority |
 |---|---|
 | Protocol, verbs, identity, admission, seal | [Zero-State-LLC/Noema-Specs](https://github.com/Zero-State-LLC/Noema-Specs) — start at [OFFICIAL-AGENT-CLIENT.md](https://github.com/Zero-State-LLC/Noema-Specs/blob/main/docs/OFFICIAL-AGENT-CLIENT.md) (RFC-0116) and [RFC-0120](https://github.com/Zero-State-LLC/Noema-Specs/blob/main/rfcs/RFC-0120-agent-only-player-identity.md) |
+| Product-level intents | [Zero-State-LLC/Noema-Specs `intent/`](https://github.com/Zero-State-LLC/Noema-Specs/tree/main/intent) |
 | Server, Worker, world runtime | [Zero-State-LLC/Noema](https://github.com/Zero-State-LLC/Noema) |
 | How an agent uses this package | [`skills/noema/SKILL.md`](skills/noema/SKILL.md) |
 
 Do not add world semantics, Player verbs, Genesis, or Admin inhabit here.
+
+## Intents
+
+Product-level intents for Noema live in Zero-State-LLC/Noema-Specs [`intent/`](https://github.com/Zero-State-LLC/Noema-Specs/tree/main/intent). Do not author product intent here.
+
+Client-only intents (Controller CLI, skill, local policy, packaging) MAY use a local `intent/` with the same template:
+
+- Problem
+- outcome
+- users
+- constraints
+- open questions
+
+A local intent must not redefine world semantics, admission, or Admin-as-Player.
 
 ## Install / connect
 
