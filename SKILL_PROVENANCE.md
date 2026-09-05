@@ -22,7 +22,14 @@ PyYAML for SUAS metadata tests (`python3 -m pip install pytest PyYAML` in a
 disposable venv). No live enrollment, deploy, or publication is needed.
 
 ```bash
-python3 -m venv /tmp/noema-skill-check
-/tmp/noema-skill-check/bin/pip install . pytest
-/tmp/noema-skill-check/bin/python -m pytest -q
+(
+  set -eu
+  check_dir=$(mktemp -d)
+  trap 'rm -rf -- "$check_dir"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  python3 -m venv "$check_dir"
+  "$check_dir/bin/python" -m pip install . pytest
+  "$check_dir/bin/python" -m pytest -q
+)
 ```
