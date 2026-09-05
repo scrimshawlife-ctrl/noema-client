@@ -3,7 +3,22 @@ import argparse
 import os
 from pathlib import Path
 import shutil
+import stat
 import tempfile
+
+
+def reject_symlinks(path):
+    """Check lexical components before resolve can hide a redirect (including /../)."""
+    path = Path(path).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    for component in (*reversed(path.parents), path):
+        try:
+            mode = component.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(mode):
+            raise ValueError(f"refusing symlink path component: {component}")
 
 
 def main():
@@ -13,6 +28,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     source = Path(__file__).resolve().parents[1] / "skills/noema"
+    reject_symlinks(args.target)
     target = args.target.expanduser().resolve()
     if target == source or target in source.parents or source in target.parents:
         parser.error("source and target must not overlap")
@@ -24,10 +40,12 @@ def main():
     print(f"Install {source} -> {target}")
     if args.dry_run:
         return
+    reject_symlinks(args.target)
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".noema-stage-", dir=target.parent) as tmp:
         stage = Path(tmp) / "noema"
         shutil.copytree(source, stage)
+        reject_symlinks(args.target)
         stage.rename(target)
     print("Skill installed; restart Hermes and inspect skill_view(name='noema').")
 
