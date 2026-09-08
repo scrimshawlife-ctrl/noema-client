@@ -156,3 +156,26 @@ python -m pytest -q
 ```
 
 Ordinary CI does not use live NOEMA credentials.
+
+## Hermes skill installation (separate from client installation)
+
+The wheel/pipx install provides the client CLI, not Hermes skill discovery.
+From a reviewed full source checkout of `scrimshawlife-ctrl/noema-client`, with
+Python 3.11+ available, run:
+
+```bash
+python3 scripts/install_skill.py --dry-run
+python3 scripts/install_skill.py
+```
+
+The default is `${HERMES_HOME:-$HOME/.hermes}/skills/noema`; `--target DIR`
+allows an explicitly reviewed destination. The installer copies SKILL.md and all
+three references from its own checkout regardless of cwd. Existing targets are
+refused: review/move the old package to a backup outside skills before upgrade;
+restore that exact backup if verification fails. Installing a skill does not
+connect, enroll, or access Controller credentials. Restart Hermes, call
+`skill_view(name="noema")`, and check skill_dir and references. YAML metadata
+supports skill-manager validation; tolerant loaders may also discover older
+frontmatter-free copies, so metadata absence is not universally a load failure.
+
+Skill source selection, migration and safe checks: [SKILL_PROVENANCE.md](SKILL_PROVENANCE.md).
