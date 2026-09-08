@@ -38,21 +38,24 @@ def cmd_connect(ns: argparse.Namespace) -> int:
     client = _client(ns)
     lines: list[str] = []
 
+    def _out(text: str = "") -> None:
+        print(text, flush=True)
+
     def announce(msg: str) -> None:
         lines.append(msg)
-        if "Approve" in msg and " at " in msg:
+        if msg.startswith("Approve ") and " at " in msg:
             code = msg.split("Approve ", 1)[1].split(" at ", 1)[0]
             uri = msg.split(" at ", 1)[1]
-            print("NOEMA\n")
-            print("Approve this agent:\n")
-            print(uri)
-            print()
-            print("Code:")
-            print(code)
-            print()
-            print("Waiting for approval...")
+            _out("NOEMA\n")
+            _out("Approve this agent:\n")
+            _out(uri)
+            _out()
+            _out("Code:")
+            _out(code)
+            _out()
+            _out("Waiting for approval...")
         else:
-            print(msg)
+            _out(msg)
 
     cred = client.connect(
         announce=announce,
@@ -60,14 +63,16 @@ def cmd_connect(ns: argparse.Namespace) -> int:
         owner_email=getattr(ns, "email", None),
         auto_enter=not bool(getattr(ns, "no_enter", False)),
     )
-    print()
-    print("Connected.")
-    print()
-    print(f"World: {client.session.world or 'pending observe'}")
-    print("Controller: agent")
-    print(f"Protocol: {client.session.protocol}")
-    print("Credential: stored locally")
-    assert cred.access_token not in "".join(lines)
+    _out()
+    _out("Connected.")
+    _out()
+    _out(f"World: {client.session.world or 'pending observe'}")
+    _out("Controller: agent")
+    _out(f"Protocol: {client.session.protocol}")
+    _out("Credential: stored locally")
+    printed = "".join(lines)
+    assert cred.access_token not in printed
+    assert "device_code" not in printed
     return 0
 
 
@@ -389,5 +394,5 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(ns.func(ns))
     except NoemaError as exc:
-        print(f"{exc.code}: {exc.message}", file=sys.stderr)
+        print(f"{exc.code}: {exc.message}", file=sys.stderr, flush=True)
         return 1

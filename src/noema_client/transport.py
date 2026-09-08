@@ -20,6 +20,17 @@ from noema_client.types import CommandResult
 USER_AGENT = f"noema-client/{__version__} (+https://github.com/scrimshawlife-ctrl/noema-client)"
 
 
+def cloudflare_challenge_code(text: str) -> str | None:
+    """Return a Cloudflare challenge code when the body names one. Never returns secrets."""
+    raw = str(text or "")
+    lowered = raw.lower()
+    if "1010" not in raw:
+        return None
+    if "cloudflare" in lowered or "error 1010" in lowered or "error code: 1010" in lowered:
+        return "1010"
+    return None
+
+
 class TokenProvider(Protocol):
     def reveal(self) -> str: ...
 
@@ -82,6 +93,9 @@ def default_http(
         if not isinstance(payload, dict):
             payload = {"error": {"message": raw or str(e)}}
         payload["_http_status"] = e.code
+        challenge = cloudflare_challenge_code(raw)
+        if challenge:
+            payload["_cloudflare_code"] = challenge
         return payload
 
 

@@ -35,6 +35,7 @@ def test_connect_docs_cover_one_click_boundaries_and_fallback() -> None:
         "owner_email",
         "passwords",
         "Admin tokens",
+        "review_delivery",
     ]
     for phrase in required:
         assert phrase in docs

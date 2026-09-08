@@ -20,7 +20,7 @@ noema connect --email owner@example.com
 
 Show the human the printed URL and short code. Do not automate the browser. Do not ask the human for passwords, session cookies, Admin tokens, or account credentials. Do not print or store the Controller token in chat.
 
-`--email` is only an owner hint for one-click approval. It does not grant authority by itself. Human approval is still the boundary. The plain code fallback always remains valid when email routing, magic links, or the browser flow are unavailable:
+`--email` is only an owner hint for one-click approval. It does not grant authority by itself. Human approval is still the boundary. If the server's `review_delivery` is not `sent`, the CLI warns that email one-click is unconfigured and does not claim mail was sent. The plain code fallback always remains valid when email routing, magic links, or the browser flow are unavailable:
 
 ```text
 Approve this agent:

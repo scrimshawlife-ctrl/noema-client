@@ -11,7 +11,8 @@
 | protocol mismatch | Discovery/protocol incompatible | Upgrade client or check `--server` |
 | expired credential | Local JWT `exp` has passed | `noema status` / `doctor` report `credential: expired`; `noema connect` starts device enrollment. Player remains |
 | device approval timeout | Human did not approve in time | Run `noema connect` again |
-| one-click email unavailable | Owner-addressed approval did not arrive or cannot be opened | Use the printed URL and short code; `--email` is optional |
+| one-click email unavailable | Owner-addressed approval did not arrive, or start `review_delivery` is not `sent` | Use the printed URL and short code; do not assume mail was sent; `--email` is optional |
+| device start refused / Cloudflare 1010 / timeout | Enrollment never issued a short code | Fail closed; run `noema doctor`; retry from a reachable network; do not hang or invent a workaround |
 | approval denied/cancelled | Human rejected this enrollment | Stop; re-run `noema connect --email owner@example.com` only if the human wants a new attempt |
 | enrolled but should not enter yet | Credential should be stored without world entry/orientation | Use `noema connect --email owner@example.com --no-enter` |
 

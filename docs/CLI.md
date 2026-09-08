@@ -14,7 +14,7 @@ Options:
 - `--no-enter`: stores the approved Controller credential without automatic `ENTER_WORLD` / orientation. Use this when enrollment and world entry are separate operator steps.
 - `--force`: starts a fresh enrollment even when a stored credential appears locally usable.
 
-The CLI always prints a browser approval URL and short code. This is the plain code fallback when owner-addressed one-click approval, email delivery, or a magic link cannot be used.
+The CLI always prints a browser approval URL and short code. This is the plain code fallback when owner-addressed one-click approval, email delivery, or a magic link cannot be used. `--email` does not mean mail was sent. If the start response `review_delivery` is not `sent`, the CLI warns that email one-click is unconfigured and forces the short-code URL.
 
 ```text
 Approve this agent:
@@ -29,11 +29,13 @@ Do not automate the browser. The human approves or denies the agent. The agent r
 
 Default successful flow:
 
-1. `POST /v1/auth/device` starts enrollment, optionally with `owner_email`.
-2. CLI prints the approval URL and short code.
-3. Human approves in the browser.
+1. CLI prints `Discovering…`, then `Requesting device code…`, then calls discovery and `POST /v1/auth/device` (optionally with `owner_email`).
+2. CLI prints the approval URL and short code, then waits with periodic `authorization_pending` heartbeats.
+3. Human approves in the browser. The CLI prints `Approved.`, `Denied.`, or `Expired.` as a distinct terminal line.
 4. CLI stores `~/.config/noema/credential.json` with mode `0600`.
 5. CLI automatically submits `ENTER_WORLD` and observes for orientation.
+
+A refused, Cloudflare-blocked, timed-out, or unreachable start fails closed after those progress lines. It does not hang and does not print `access_token`, `device_code`, or a JWT.
 
 `--no-enter` stops after step 4. Later commands such as `noema observe` or `noema play --max-actions 8` can enter and orient when needed.
 

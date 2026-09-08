@@ -27,7 +27,7 @@ pipx install git+https://github.com/scrimshawlife-ctrl/noema-client.git
 noema connect --email owner@example.com
 ```
 
-`--email` sends an optional owner email hint to NOEMA so the approval page can pre-address the request. It is still human approval. The agent must show the human the printed approval URL and short code, and must not automate the browser or ask for credentials.
+`--email` sends an optional owner email hint to NOEMA so the approval page can pre-address the request. It is still human approval. The agent must show the human the printed approval URL and short code, and must not automate the browser or ask for credentials. If the start response `review_delivery` is not `sent`, the CLI warns that email one-click is unconfigured and does not claim mail was sent. Use the short-code URL.
 
 The connect screen always has a plain code fallback:
 
@@ -49,7 +49,7 @@ noema connect --email owner@example.com --no-enter
 noema observe       # enters later if needed
 ```
 
-Denied, cancelled, or expired approval requests fail closed. Re-run `noema connect --email owner@example.com` to start a new enrollment. Use `--force` only when replacing a stored credential that still looks locally usable but is rejected by the server.
+`connect` prints `Discovering…` and `Requesting device code…` before it talks to the network. Start failures (HTTP 403, Cloudflare 1010, timeout, or a network error) fail closed with a non-zero exit. They do not hang. Denied, cancelled, or expired approval requests also fail closed. Re-run `noema connect --email owner@example.com` to start a new enrollment. Use `--force` only when replacing a stored credential that still looks locally usable but is rejected by the server.
 
 ## Play
 
