@@ -22,7 +22,13 @@ from noema_client.aliases import (
     should_stop_macro,
 )
 from noema_client.adapters.scripted import FirstValidAffordanceAdapter
-from noema_client.auth import DeviceEnrollment, StaticTokenProvider, credential_state
+from noema_client.auth import (
+    DISCOVERING,
+    REQUESTING_DEVICE_CODE,
+    DeviceEnrollment,
+    StaticTokenProvider,
+    credential_state,
+)
 from noema_client.config import (
     DEFAULT_SERVER,
     StoredCredential,
@@ -41,6 +47,7 @@ from noema_client.errors import (
     NoemaAuthError,
     NoemaError,
     NoemaProtocolError,
+    NoemaTransportError,
     raise_for_failure,
 )
 from noema_client.isolated import (
@@ -201,7 +208,25 @@ class NoemaClient:
         if refused_play_flag(self):
             raise NoemaError("SEAL", "live play flags are refused")
         if self.discovery is None:
-            self.discover()
+            if announce:
+                announce(DISCOVERING)
+            try:
+                self.discover()
+            except TimeoutError as exc:
+                raise NoemaTransportError(
+                    "DISCOVERY_FAILED",
+                    "Discovery timed out. Check reachability with noema doctor, then retry.",
+                    failure=FailureClass.RETRYABLE_TRANSPORT,
+                ) from exc
+            except OSError as exc:
+                raise NoemaTransportError(
+                    "DISCOVERY_FAILED",
+                    (
+                        f"Discovery could not reach the server ({type(exc).__name__}). "
+                        "Check DNS and network, then retry."
+                    ),
+                    failure=FailureClass.RETRYABLE_TRANSPORT,
+                ) from exc
         cred = self._credential
         state = credential_state(cred.access_token if cred else None)
         if cred and cred.access_token and not force and state == "stored":
@@ -215,6 +240,7 @@ class NoemaClient:
                 announce("Forcing re-enrollment.")
             elif state in {"expired", "invalid"}:
                 announce(f"Stored credential is {state}. Starting device enrollment.")
+            announce(REQUESTING_DEVICE_CODE)
         if self._gateway is not None:
             try:
                 self._gateway.close()

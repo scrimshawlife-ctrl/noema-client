@@ -32,6 +32,9 @@ class FakeNoema:
         self.observe_requires_enter = False
         self.device_starts = 0
         self.auto_approve = False
+        self.review_delivery: str | None = None
+        self.device_start_status = 200
+        self.device_start_body: dict[str, Any] | None = None
 
     def observation(self) -> dict[str, Any]:
         return {
@@ -73,6 +76,10 @@ class FakeNoema:
             return 200, {"status": "ok", "protocol_version": "1"}
         if method == "POST" and path == "/v1/auth/device":
             self.device_starts += 1
+            if self.device_start_status >= 400:
+                return self.device_start_status, dict(
+                    self.device_start_body or {"error": {"message": "refused"}}
+                )
             rec = {
                 "device_code": "dev.fixture",
                 "user_code": "7KMP-41QZ",
@@ -83,6 +90,9 @@ class FakeNoema:
             }
             if body.get("owner_email"):
                 rec["owner_email"] = body.get("owner_email")
+                rec["review_delivery"] = self.review_delivery or "unconfigured"
+            elif self.review_delivery is not None:
+                rec["review_delivery"] = self.review_delivery
             self.pending[rec["device_code"]] = rec
             if self.auto_approve:
                 self.approve(rec["device_code"])

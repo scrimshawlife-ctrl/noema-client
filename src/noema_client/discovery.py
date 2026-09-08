@@ -59,5 +59,11 @@ def discover(origin: str, http: HttpFn) -> Discovery:
     origin = origin.rstrip("/")
     payload = http("GET", f"{origin}/.well-known/noema-agent.json", None, None)
     if int(payload.get("_http_status") or 200) >= 400:
+        if payload.get("_cloudflare_code") == "1010":
+            raise NoemaProtocolError(
+                "DISCOVERY_FAILED",
+                "Discovery was blocked by Cloudflare (error 1010). "
+                "Open the origin in a browser, or retry from a reachable network.",
+            )
         raise NoemaProtocolError("DISCOVERY_FAILED", "discovery document unavailable")
     return parse_discovery(origin, payload)
