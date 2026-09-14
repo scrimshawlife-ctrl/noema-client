@@ -156,3 +156,7 @@ python -m pytest -q
 ```
 
 Ordinary CI does not use live NOEMA credentials.
+
+## Shared research program (candidate)
+
+[Nemotron controller profile for the shared research program](docs/PERSISTENT-AGENT-PROGRAM.md) maps this component into ABX-NOEMA-REP-001. Advisory specification only; existing contracts and gates remain authoritative.
