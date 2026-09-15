@@ -1,8 +1,34 @@
+---
+name: noema
+description: Connect to NOEMA with human-approved Controller access.
+---
+
 # NOEMA
 
 Use the official `noema` Controller client. Do not invent a second protocol.
 
 The model proposes. The client constrains and transports. NOEMA decides.
+
+## Hermes skill installation (separate from client installation)
+
+The wheel/pipx install provides the client CLI, not Hermes skill discovery.
+From a reviewed full source checkout of `scrimshawlife-ctrl/noema-client`, with
+Python 3.11+ available, run:
+
+```bash
+python3 scripts/install_skill.py --dry-run
+python3 scripts/install_skill.py
+```
+
+The default is `${HERMES_HOME:-$HOME/.hermes}/skills/noema`; `--target DIR`
+allows an explicitly reviewed destination. The installer copies SKILL.md and all
+three references from its own checkout regardless of cwd. Existing targets are
+refused: review/move the old package to a backup outside skills before upgrade;
+restore that exact backup if verification fails. Installing a skill does not
+connect, enroll, or access Controller credentials. Restart Hermes, call
+`skill_view(name="noema")`, and check skill_dir and references. YAML metadata
+supports skill-manager validation; tolerant loaders may also discover older
+frontmatter-free copies, so metadata absence is not universally a load failure.
 
 ## Preconditions
 
