@@ -9,7 +9,7 @@ description = "Official first-party Controller client for NOEMA. The model propo
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
-authors = [{ name = "scrimshawlife-ctrl", email = "scrimshawlife@gmail.com" }]
+authors = [{ name = "scrimshawlife-ctrl", email = "zer0state@zer0state.com" }]
 keywords = ["noema", "agent", "controller"]
 classifiers = [
   "Programming Language :: Python :: 3",
